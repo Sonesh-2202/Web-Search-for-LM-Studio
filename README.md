@@ -12,8 +12,8 @@ Search results are evidence leads, not guaranteed truth. The server returns sour
 
 - Fresh metasearch for each search request; search answers are not served from a local cache.
 - `smart_search` and `deep_search` fetch selected pages in parallel and return their URLs, page content, available publication metadata, and retrieval time.
-- Time-sensitive queries include the current month and year. Explicitly recent queries can use search-engine date filters; upcoming schedules avoid narrow date filters so older announcements remain discoverable.
-- Generic extraction for page text, JSON-LD, OpenGraph metadata, publication/update dates, and HTML tables, with additional parsers for selected domains.
+- Every search query includes the server's current local date, and every search result includes the retrieval time in local time and UTC. Explicitly recent queries can use search-engine date filters; upcoming schedules avoid narrow date filters so older announcements remain discoverable.
+- Source results include readable page text alongside extracted JSON-LD, OpenGraph metadata, publication/update dates, and HTML tables when available, with additional parsers for selected domains.
 - Thirteen focused MCP tools, exposed over stdio for local clients.
 - No search API key is required by default. Public search engines and websites can rate-limit or change their pages.
 
@@ -76,7 +76,7 @@ Restart or refresh MCP servers in LM Studio. For platform-specific examples, see
 
 ## Search behavior and accuracy
 
-For a current factual question, the model should call `smart_search` before answering. It searches using the current date context, reads selected pages, and returns a retrieval timestamp. The timestamp means “fetched at”; it does **not** mean that every result was published or updated then. When available, page publication and update dates are labeled separately.
+For a factual question, the model should call `smart_search` before answering. Every search query includes the current local date, the tool reads selected pages, and the result includes a retrieval timestamp. The timestamp means “fetched at”; it does **not** mean that every result was published or updated then. When available, page publication and update dates are labeled separately.
 
 For release dates, schedules, and other events that may have changed, use evidence published after the scheduled date to decide whether the event actually happened. If only older announcements are available, report what was scheduled at the time and say the outcome could not be verified. Prefer official announcements for plans and independent current reporting for what happened. Cite only URLs returned by the tools; never turn a search snippet or an old prediction into a confirmed fact.
 

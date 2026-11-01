@@ -7,6 +7,7 @@ Falls back to Google News RSS if needed.
 
 import asyncio
 import logging
+import os
 from datetime import datetime
 from html import unescape
 from urllib.parse import quote_plus
@@ -33,18 +34,22 @@ TOPIC_URLS = {
 def get_news_ddgs(topic: str, count: int = 5) -> str | None:
     """Get news using ddgs library (primary method)."""
     try:
-        ddgs = DDGS()
+        ddgs = DDGS(timeout=12)
+        current_date = datetime.now().astimezone().strftime("%B %d, %Y")
+        dated_topic = f"{topic} as of {current_date}"
+        region = os.environ.get("MCP_SEARCH_REGION", "in-en")
         
         # Use ddgs news search for fresh results
         results = list(ddgs.news(
-            topic,
+            dated_topic,
+            region=region,
             max_results=count,
             timelimit="d"  # Last day for most recent news
         ))
         
         if not results:
             # Try with weekly timelimit
-            results = list(ddgs.news(topic, max_results=count, timelimit="w"))
+            results = list(ddgs.news(dated_topic, region=region, max_results=count, timelimit="w"))
         
         if not results:
             return None

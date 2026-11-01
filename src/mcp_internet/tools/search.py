@@ -27,10 +27,11 @@ _SKIP_PAGE_RE = re.compile(r"\.(?:pdf|zip|exe)(?:$|[?#])|youtube\.com/watch|yout
 
 
 def _query_with_date_context(query: str, now: datetime) -> str:
-    """Anchor explicitly time-sensitive searches to the current month/year."""
+    """Give every search an explicit as-of date from the server's local clock."""
+    as_of = now.strftime("%B %d, %Y")
     if _TIME_SENSITIVE_RE.search(query):
-        return f"{query} {now.strftime('%B %Y')}"
-    return query
+        return f"{query} current status as of {as_of}"
+    return f"{query} as of {as_of}"
 
 
 def _time_filter_for_query(query: str) -> str | None:
@@ -153,8 +154,8 @@ def _format_result_list(results: list[dict], limit: int) -> str:
     return "\n\n".join(lines)
 
 
-async def _extract_source(result: dict, max_chars: int = 2200) -> str:
-    """Fetch one result and return structured data or readable page text."""
+async def _extract_source(result: dict, max_chars: int = 1800) -> str:
+    """Fetch one result and return both extracted metadata and readable text."""
     url = result.get("href", result.get("link", ""))
     title = result.get("title", "Untitled")
     if not url or not url.startswith(("http://", "https://")) or _SKIP_PAGE_RE.search(url):
@@ -171,15 +172,18 @@ async def _extract_source(result: dict, max_chars: int = 2200) -> str:
                 value for key, value in data.items()
                 if key not in {"source", "title", "type"}
             )
-            if has_structured_evidence and structured:
-                return f"## {title}\nURL: {url}\n{structured[:max_chars]}"
             from .webpage import clean_text, extract_main_content
 
             soup = BeautifulSoup(html, "lxml")
             content = clean_text(extract_main_content(soup, url))
+            page_title = soup.title.get_text(" ", strip=True) if soup.title else title
+            sections = [f"## {page_title}\nURL: {url}"]
+            if has_structured_evidence and structured:
+                sections.append("### Extracted metadata\n" + structured[:1000])
             if content:
-                page_title = soup.title.get_text(" ", strip=True) if soup.title else title
-                return f"## {page_title}\nURL: {url}\n{content[:max_chars]}"
+                sections.append("### Page text\n" + content[:max_chars])
+            if len(sections) > 1:
+                return "\n\n".join(sections)
     except Exception as e:
         logger.warning("Unable to extract result %s: %s", url, e)
 
@@ -200,11 +204,10 @@ async def search_web(query: str, num_results: int = 10, deep_search: bool = Fals
     search_query = _query_with_date_context(query, now)
     results = await _search(search_query, num_results, _time_filter_for_query(query))
     if not results:
-        return f"No fresh results found for: {query}. Try a different query."
+        return f"Search performed: {get_current_datetime()}\nNo fresh results found for: {query}. Try a different query."
 
     output = [f"Search performed: {get_current_datetime()}", f"Search: {query}"]
-    if search_query != query:
-        output.append(f"Date-anchored query: {search_query}")
+    output.append(f"Search query with time context: {search_query}")
     output.append(_format_result_list(results, num_results))
 
     if deep_search:
@@ -262,8 +265,7 @@ async def deep_search(query: str, num_sources: int = 5) -> str:
         f"Fresh search performed at {clock_context}",
         f"Question: {query}",
     ]
-    if search_query != query:
-        sections.append(f"Search query anchored to the current month: {search_query}")
+    sections.append(f"Search query with time context: {search_query}")
     sections.append("## Search results\n" + _format_result_list(results, min(len(results), 8)))
     if extracted:
         sections.append("## Read source pages\n" + "\n\n".join(extracted))

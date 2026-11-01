@@ -24,9 +24,9 @@ The server no longer registers the previous email, QR, IP, URL-shortening, trans
 - Use **`smart_search`** for factual answers. It performs a fresh DuckDuckGo search, fetches selected source pages concurrently, extracts page content, and returns source URLs plus the current local and UTC time.
 - Use **`deep_search`** when a question needs broader source coverage. It also performs a fresh search and includes clock context.
 - Use **`search_web`** for link discovery. Its snippets are leads; use `smart_search` to ground an answer in page content.
-- Time-sensitive queries include the current month and year. Explicit recency requests can use a search-engine date filter. Upcoming schedules avoid narrow date filters so older announcements can still be found. Search results are not served from a cache.
+- Every search query is anchored to the current local date; every result also includes the local/UTC retrieval time. Explicit recency requests can use a search-engine date filter. Upcoming schedules avoid narrow date filters so older announcements can still be found. Search results are not served from a cache.
 - The shared `get_current_datetime` function reads the local system clock. It supports the system timezone, common city names, and IANA timezones, and returns local and UTC timestamps. Search results include this automatically, so the model need not make a second clock call for ordinary research.
-- Source pages are read in parallel, with duplicate publisher domains skipped where possible. Page publication dates are included only when found in page data; the fetch timestamp is not a publication date.
+- Source pages are read in parallel, with duplicate publisher domains skipped where possible. Extracted structured metadata is returned alongside readable page text. Page publication dates are included only when found in page data; the fetch timestamp is not a publication date.
 
 The `ddgs` metasearch package is primary, with DuckDuckGo HTML as a fallback. Search ranking is provided by the search backend; the server does not independently verify ranking or claim that snippets prove a fact. If source pages cannot be opened, the response says to treat snippets as leads only.
 

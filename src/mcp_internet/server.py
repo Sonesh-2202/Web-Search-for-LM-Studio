@@ -44,9 +44,11 @@ def _with_fetch_timestamp(label: str, result: str) -> str:
 # =============================================================================
 @mcp.tool()
 async def search_web(query: str, num_results: int = 10, deep_search: bool = False) -> str:
-    """Quickly find current web links and snippets from a fresh search.
+    """Find web links and snippets from a fresh search with today's date attached.
 
-    Use smart_search for an answer that needs evidence from page content.
+    Every query is anchored to the local current date and the result includes
+    a local/UTC retrieval timestamp. Use smart_search to verify factual claims
+    against fetched source pages.
     
     Args:
         query: The search query (person, topic, question, anything)
@@ -59,10 +61,13 @@ async def search_web(query: str, num_results: int = 10, deep_search: bool = Fals
 
 @mcp.tool()
 async def smart_search(query: str, max_sources: int = 3) -> str:
-    """Always use for real-world factual answers.
+    """Always use before answering a real-world factual question.
 
-    Searches afresh, reads top source pages in parallel, and includes current
-    local/UTC time context. Use deep_search when broader coverage is needed.
+    Searches afresh with the current local date added to the query, reads top
+    source pages in parallel, and includes a local/UTC timestamp. Use
+    deep_search when broader coverage is needed. For releases or events whose
+    scheduled date has passed, verify with post-date evidence before saying
+    they happened or describing them as upcoming.
     """
     from .tools.search import smart_search as _smart_search
     return await _smart_search(query, max(1, min(max_sources, 8)))
@@ -70,7 +75,7 @@ async def smart_search(query: str, max_sources: int = 3) -> str:
 
 @mcp.tool()
 async def deep_search(query: str, num_sources: int = 5) -> str:
-    """Do fresh, broader research and read multiple source pages in parallel.
+    """Do fresh, broader research with today's date in the query and read multiple source pages.
     
     Args:
         query: Research topic or question
