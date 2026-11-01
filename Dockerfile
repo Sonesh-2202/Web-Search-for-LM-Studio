@@ -11,7 +11,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 # Install dependencies
 COPY pyproject.toml .
-RUN pip install --no-cache-dir "mcp[cli]>=1.2.0" httpx beautifulsoup4 lxml
+RUN pip install --no-cache-dir "mcp[cli]>=1.2.0" httpx beautifulsoup4 lxml "ddgs>=9.0.0"
 
 # Copy source code
 COPY src/ ./src/

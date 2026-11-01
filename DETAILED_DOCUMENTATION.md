@@ -1,87 +1,70 @@
 # MCP Internet Server: Technical Overview
 
-This document describes the current implementation in `src/mcp_internet`. For installation and operating-system-specific LM Studio setup, see [MULTI_PLATFORM_GUIDE.md](MULTI_PLATFORM_GUIDE.md).
+This document describes the current implementation in `src/mcp_internet`. For platform-specific setup, see [MULTI_PLATFORM_GUIDE.md](MULTI_PLATFORM_GUIDE.md).
 
-## What it does
+## Purpose
 
-MCP Internet Server is a Python MCP server intended to run as a local process alongside an MCP client such as LM Studio. It registers 25 tools. Search, page reading, and service-specific tools make network requests; calculation and QR generation can operate locally. Email sending is available when SMTP credentials are configured.
+MCP Internet Server is a local Python MCP server for LM Studio and other MCP clients. It exposes 13 focused tools for fresh web research, page reading, news, community/video/developer sources, weather, and time. The server uses stdio transport; logs go to stderr.
 
-## Architecture
-
-```text
-LM Studio (MCP client)
-        │ JSON-RPC over stdio
-        ▼
-src/mcp_internet/server.py  — FastMCP tool registry and entry point
-        │
-        ├── tools/search.py       — DuckDuckGo search and extraction flows
-        ├── tools/webpage.py      — HTML page extraction
-        ├── tools/*.py            — News, social, video, GitHub, weather, etc.
-        └── utils/
-            ├── http_client.py    — Shared async HTTP requests
-            ├── extractors.py     — JSON-LD, OpenGraph, tables, domain parsers
-            └── cache.py          — SQLite TTL cache with memory fallback
-```
-
-The MCP wrappers in `server.py` import tool implementations when called. Most network tools use the shared `httpx.AsyncClient` helpers. HTML tools parse responses with BeautifulSoup and lxml. Search and page results use the SQLite cache where implemented.
-
-### Search flows
-
-- **`smart_search`** calls the multi-source extraction flow with a default of three sources. Set `max_sources` from 1 to 8.
-- **`deep_search`** uses the same flow with a default of five sources. Set `num_sources` from 1 to 8.
-- Both search DuckDuckGo, using its HTML results page first and the `ddgs` package as a fallback, then read selected results and return snippets with extracted page content.
-- **`search_web`** returns search results and snippets. Its `deep_search` option also fetches content from up to three results.
-- **`quick_lookup`** reads the top result; **`search_site`** adds a DuckDuckGo `site:` filter.
-
-The current deep-search implementation reads result pages sequentially. Search result order is not re-ranked by a separate authority score.
-
-## Registered tools
+## Tool list
 
 | Group | Tools |
 |---|---|
-| Search | `smart_search`, `deep_search`, `search_web`, `quick_lookup`, `search_site` |
+| Search | `smart_search`, `deep_search`, `search_web` |
 | Reading | `read_webpage`, `read_pdf` |
-| News and social | `get_news`, `search_reddit`, `search_twitter` |
+| News and community | `get_news`, `search_reddit` |
 | YouTube | `search_youtube`, `get_video_info` |
 | GitHub | `search_github`, `get_repo_info` |
-| Weather and time | `get_weather`, `get_current_time` |
-| Translation and math | `translate_text`, `calculate` |
-| URL and IP | `shorten_url`, `get_my_ip`, `geolocate_ip` |
-| QR codes | `generate_qr`, `generate_wifi_qr` |
-| Email | `send_email` |
-| Cache | `clear_cache` |
+| Weather and time | `get_weather`, `get_current_datetime` |
 
-## Shared services
+The server no longer registers the previous email, QR, IP, URL-shortening, translation, calculator, Twitter/Nitter, or cache-management tools.
 
-### HTTP client
+## Search and freshness
 
-`utils/http_client.py` provides `fetch_url`, `fetch_json`, and `fetch_multiple`. Requests use `httpx`, a shared async client, timeouts, retry handling, redirects, rotating browser-style user-agent headers, and a basic per-domain rate limiter. The functions return `None` on request failures and log details to stderr.
+- Use **`smart_search`** for factual answers. It performs a fresh DuckDuckGo search, fetches selected source pages concurrently, extracts page content, and returns source URLs plus the current local and UTC time.
+- Use **`deep_search`** when a question needs broader source coverage. It also performs a fresh search and includes clock context.
+- Use **`search_web`** for link discovery. Its snippets are leads; use `smart_search` to ground an answer in page content.
+- Time-sensitive queries include the current month and year. Explicit recency requests can use a search-engine date filter. Upcoming schedules avoid narrow date filters so older announcements can still be found. Search results are not served from a cache.
+- The shared `get_current_datetime` function reads the local system clock. It supports the system timezone, common city names, and IANA timezones, and returns local and UTC timestamps. Search results include this automatically, so the model need not make a second clock call for ordinary research.
+- Source pages are read in parallel, with duplicate publisher domains skipped where possible. Page publication dates are included only when found in page data; the fetch timestamp is not a publication date.
 
-### Extraction
+The `ddgs` metasearch package is primary, with DuckDuckGo HTML as a fallback. Search ranking is provided by the search backend; the server does not independently verify ranking or claim that snippets prove a fact. If source pages cannot be opened, the response says to treat snippets as leads only.
 
-`utils/extractors.py` handles JSON-LD, OpenGraph metadata, HTML tables, and generic page metadata. It also includes Wikipedia, IMDb, and LinkedIn-specific extraction functions. `tools/webpage.py` removes common non-content elements and extracts readable page text.
+## Other sources
 
-### Cache
+- `get_news` fetches current headlines and includes the local/UTC fetch timestamp.
+- `search_reddit` searches Reddit posts.
+- `search_youtube` and `get_video_info` search video results and retrieve a video's metadata.
+- `search_github` and `get_repo_info` use GitHub's public API.
+- `get_weather` uses Open-Meteo geocoding and weather endpoints.
+- `get_current_datetime(location)` reads the system clock for the local timezone, a common city, or an IANA timezone. It makes no network request.
+- `read_webpage` and `read_pdf` fetch user-specified URLs and return extracted text.
 
-`utils/cache.py` stores string results in SQLite with category-based TTL values and falls back to a process-local memory cache if SQLite is unavailable. `clear_cache` clears all entries or a selected category when using SQLite.
+Network sources are public services; their availability and response formats can change. A search timestamp records when this server fetched results, not when every source published or last updated its information.
 
-## Tool data sources
+## Implementation map
 
-Network-backed tools use public endpoints or website pages; availability and response formats can change. The principal integrations in the source include:
+```text
+LM Studio / MCP client
+        │ JSON-RPC over stdio
+        ▼
+src/mcp_internet/server.py      FastMCP tool registry
+        ├── tools/search.py       Fresh search, date anchoring, parallel extraction
+        ├── tools/webpage.py      HTML reading and structured extraction
+        ├── tools/news.py         News headlines
+        ├── tools/reddit.py       Reddit search
+        ├── tools/youtube.py      YouTube search and metadata
+        ├── tools/github.py       GitHub search and repository details
+        ├── tools/weather.py     Open-Meteo
+        ├── tools/time.py         Local clock and timezone handling
+        └── utils/
+            ├── http_client.py   Shared async HTTP, retries, rate limits
+            └── extractors.py    JSON-LD, OpenGraph, tables, domain parsers
+```
 
-- DuckDuckGo search HTML and the `ddgs` fallback library
-- Google News RSS, Reddit JSON endpoints, and Nitter instances for Twitter/X
-- YouTube pages and public GitHub API endpoints
-- Open-Meteo geocoding and weather endpoints
-- Time zone lookup through Python's `zoneinfo`, with a WorldTimeAPI fallback
-- A public translation endpoint in `tools/translator.py`
-- Configured SMTP for `send_email`
+## Run from LM Studio
 
-Most tools do not need API keys. Email requires SMTP credentials supplied through `MCP_SMTP_SERVER`, `MCP_SMTP_PORT`, `MCP_SMTP_EMAIL`, and `MCP_SMTP_PASSWORD`.
-
-## Running the server
-
-Install the project dependencies with `uv sync`, then configure the MCP client to start the `mcp-internet` command from the project directory. A typical LM Studio entry is:
+Install with `uv sync`, then use the project directory in `mcp.json`:
 
 ```json
 {
@@ -100,18 +83,8 @@ Install the project dependencies with `uv sync`, then configure the MCP client t
 }
 ```
 
-The server uses stdio transport. Logs go to stderr so they do not corrupt MCP messages on stdout. The console entry point is defined in `pyproject.toml`; direct module execution is also supported with `python -m mcp_internet.server` from an environment where the package is installed.
+The project requires Python 3.10+, `mcp[cli]`, `httpx[http2]`, BeautifulSoup, lxml, and `ddgs`. PDF reading uses the optional `pdfplumber` dependency; install it with `uv sync --extra pdf`.
 
-## Dependencies
+## LM Studio model instructions
 
-The core dependencies declared in `pyproject.toml` are Python 3.10+, `mcp[cli]`, `httpx[http2]`, BeautifulSoup, lxml, `ddgs`, and `aiosqlite`. PDF extraction uses the optional `pdfplumber` dependency; install it with `uv sync --extra pdf` when needed.
-
-## Source map
-
-- `src/mcp_internet/server.py` — MCP tool registration and process entry point
-- `src/mcp_internet/tools/` — Individual tool implementations
-- `src/mcp_internet/utils/http_client.py` — Shared HTTP behavior
-- `src/mcp_internet/utils/extractors.py` — Page extraction helpers
-- `src/mcp_internet/utils/cache.py` — TTL cache
-- `pyproject.toml` — Dependencies and `mcp-internet` command
-- `LM_STUDIO_PROMPT.md` — Optional LM Studio system-prompt template
+Use [LM_STUDIO_PROMPT.md](LM_STUDIO_PROMPT.md) as the system prompt. It tells the model to search before factual answers, distinguish fetched time from publication time, cite only returned URLs, and state when the available evidence is incomplete.

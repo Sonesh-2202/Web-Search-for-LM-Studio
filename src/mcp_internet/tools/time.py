@@ -1,21 +1,9 @@
-"""
-World Time Tool - Get current time for any timezone or city.
+"""Local current date/time from the machine clock, with timezone support."""
 
-Uses WorldTimeAPI and Python's built-in timezone handling.
-"""
-
-import logging
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo, available_timezones
 
-from ..utils.http_client import fetch_json
 
-logger = logging.getLogger(__name__)
-
-# WorldTimeAPI endpoint
-WORLDTIME_API = "https://worldtimeapi.org/api/timezone"
-
-# Common city to timezone mappings
 CITY_TIMEZONES = {
     "new york": "America/New_York",
     "nyc": "America/New_York",
@@ -59,127 +47,33 @@ CITY_TIMEZONES = {
 
 
 def find_timezone(location: str) -> str | None:
-    """Find timezone for a location string."""
-    location_lower = location.lower().strip()
-    
-    # Check city mappings first
-    if location_lower in CITY_TIMEZONES:
-        return CITY_TIMEZONES[location_lower]
-    
-    # Check if it's already a valid timezone
-    if location in available_timezones():
-        return location
-    
-    # Try to find partial matches in available timezones
-    for tz in available_timezones():
-        if location_lower in tz.lower():
-            return tz
-    
+    """Resolve a common city name or IANA timezone."""
+    value = location.strip()
+    if value.lower() in CITY_TIMEZONES:
+        return CITY_TIMEZONES[value.lower()]
+    if value in available_timezones():
+        return value
     return None
 
 
-def format_time(dt: datetime, timezone_name: str) -> str:
-    """Format datetime nicely."""
-    # Get day of week
-    day_name = dt.strftime("%A")
-    date_str = dt.strftime("%B %d, %Y")
-    time_str = dt.strftime("%I:%M:%S %p")
-    
-    # Calculate UTC offset
-    offset = dt.strftime("%z")
-    offset_formatted = f"UTC{offset[:3]}:{offset[3:]}" if offset else "UTC"
-    
-    return f"""🕐 **Current Time**
-{'=' * 40}
-
-📍 **{timezone_name}**
-
-📅 {day_name}, {date_str}
-🕐 {time_str}
-🌐 {offset_formatted}
-"""
-
-
-async def get_time_from_api(timezone_name: str) -> str | None:
-    """Get time from WorldTimeAPI."""
-    url = f"{WORLDTIME_API}/{timezone_name}"
-    data = await fetch_json(url)
-    
-    if not data or "datetime" not in data:
-        return None
-    
-    try:
-        # Parse the datetime string
-        dt_str = data["datetime"]
-        # WorldTimeAPI returns ISO format with timezone
-        dt = datetime.fromisoformat(dt_str)
-        
-        abbreviation = data.get("abbreviation", "")
-        utc_offset = data.get("utc_offset", "")
-        
-        day_name = dt.strftime("%A")
-        date_str = dt.strftime("%B %d, %Y")
-        time_str = dt.strftime("%I:%M:%S %p")
-        
-        return f"""🕐 **Current Time**
-{'=' * 40}
-
-📍 **{timezone_name}**
-   {abbreviation if abbreviation else ""}
-
-📅 {day_name}, {date_str}
-🕐 {time_str}
-🌐 UTC{utc_offset}
-"""
-    except Exception as e:
-        logger.error(f"Error parsing time API response: {e}")
-        return None
-
-
-async def get_current_time(location: str = "UTC") -> str:
-    """
-    Get current time for a timezone or city.
-    
-    Args:
-        location: Timezone name (e.g., "America/New_York"), 
-                  city name (e.g., "Tokyo"), or "UTC"
-        
-    Returns:
-        Formatted current time
-    """
+def get_current_datetime(location: str = "local") -> str:
+    """Return the local-clock timestamp for a city/timezone and in UTC."""
     location = location.strip()
-    if not location:
-        location = "UTC"
-    
-    # Find the timezone
-    timezone_name = find_timezone(location)
-    
-    if timezone_name:
-        # Try API first for more accurate time
-        api_result = await get_time_from_api(timezone_name)
-        if api_result:
-            return api_result
-        
-        # Fall back to local calculation
+    if not location or location.lower() in {"local", "system"}:
+        local_now = datetime.now().astimezone()
+        zone_name = local_now.tzname() or "local"
+    else:
+        timezone_name = find_timezone(location)
+        if timezone_name is None:
+            return f'Unable to find timezone for "{location}". Try a common city or IANA timezone such as Asia/Kolkata.'
         try:
-            tz = ZoneInfo(timezone_name)
-            now = datetime.now(tz)
-            return format_time(now, timezone_name)
-        except Exception as e:
-            logger.error(f"Error getting time for {timezone_name}: {e}")
-    
-    # If timezone not found, try API directly (might have different naming)
-    api_result = await get_time_from_api(location)
-    if api_result:
-        return api_result
-    
-    # Provide helpful error
-    return f"""❌ Unable to find timezone for: "{location}"
+            local_now = datetime.now(ZoneInfo(timezone_name))
+        except Exception:
+            return f'Unable to load timezone data for "{timezone_name}". Use the local timezone or install the Python tzdata package.'
+        zone_name = timezone_name
 
-**Try one of these formats:**
-• City name: "Tokyo", "New York", "London"
-• Timezone: "America/New_York", "Europe/Paris", "Asia/Tokyo"
-• "UTC" for Coordinated Universal Time
-
-**Common cities:** New York, Los Angeles, London, Paris, Tokyo, Sydney, Mumbai, Dubai, Singapore
-"""
+    utc_now = local_now.astimezone(timezone.utc)
+    return (
+        f"{zone_name}: {local_now.isoformat(timespec='seconds')}\n"
+        f"UTC: {utc_now.isoformat(timespec='seconds')}"
+    )

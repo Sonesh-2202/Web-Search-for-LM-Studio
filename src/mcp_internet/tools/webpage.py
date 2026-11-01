@@ -4,12 +4,11 @@ Webpage Reader Tool - Extract clean text content from any URL.
 Uses BeautifulSoup to parse HTML and extract the main readable content,
 stripping navigation, ads, scripts, and other non-content elements.
 
-v3.0 Upgrades:
+Features:
 - JSON-LD structured data extraction
 - HTML table → markdown table conversion
 - Domain-aware extraction using extractor registry
 - OpenGraph meta tag extraction
-- Result caching
 """
 
 import logging
@@ -18,7 +17,6 @@ import re
 from bs4 import BeautifulSoup
 
 from ..utils.http_client import fetch_url
-from ..utils.cache import cache_get, cache_set
 
 logger = logging.getLogger(__name__)
 
@@ -117,11 +115,6 @@ async def read_webpage(url: str, max_length: int = 5000) -> str:
     if not url.startswith(("http://", "https://")):
         url = "https://" + url
     
-    # Check cache
-    cached = await cache_get("page", f"read:{url}", max_length=max_length)
-    if cached:
-        return cached
-    
     html = await fetch_url(url)
     if not html:
         return f"❌ Error: Unable to fetch content from {url}. The page may be unavailable or blocking requests."
@@ -190,9 +183,6 @@ async def read_webpage(url: str, max_length: int = 5000) -> str:
 
 {content}
 """
-        # Cache the result
-        await cache_set("page", f"read:{url}", output, max_length=max_length)
-        
         return output
         
     except Exception as e:

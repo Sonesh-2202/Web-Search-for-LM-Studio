@@ -5,6 +5,7 @@ Uses ddgs library for reliable and fresh news results.
 Falls back to Google News RSS if needed.
 """
 
+import asyncio
 import logging
 from datetime import datetime
 from html import unescape
@@ -174,7 +175,7 @@ async def get_news(topic: str = "world", count: int = 5) -> str:
         Formatted news headlines
     """
     # Try ddgs first (more reliable for fresh news)
-    result = get_news_ddgs(topic, count)
+    result = await asyncio.to_thread(get_news_ddgs, topic, count)
     if result:
         return result
     

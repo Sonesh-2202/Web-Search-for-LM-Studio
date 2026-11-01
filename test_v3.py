@@ -8,17 +8,7 @@ if sys.platform == "win32":
 
 
 async def test():
-    # Test 1: Cache system
-    from mcp_internet.utils.cache import cache_get, cache_set, cache_clear
-    await cache_set("search", "test_query", "test_value")
-    result = await cache_get("search", "test_query")
-    assert result == "test_value", f"Cache failed: got {result}"
-    await cache_clear("search")
-    result = await cache_get("search", "test_query")
-    assert result is None, "Cache clear failed"
-    print("✅ Cache system: PASS")
-    
-    # Test 2: Extractors
+    # Test 1: Extractors
     from mcp_internet.utils.extractors import extract_structured_data
     html = (
         '<html><head><title>Test Page</title>'
@@ -30,19 +20,19 @@ async def test():
     assert "title" in data, f"Extraction failed: {data}"
     print(f"✅ Extractors: PASS (extracted keys: {list(data.keys())})")
     
-    # Test 3: HTTP client upgrades
+    # Test 2: HTTP client
     from mcp_internet.utils.http_client import _get_default_headers, _USER_AGENTS
     h1 = _get_default_headers()
     assert "User-Agent" in h1
     assert len(_USER_AGENTS) >= 5
     print(f"✅ HTTP client: PASS ({len(_USER_AGENTS)} UAs, rate limiter ready)")
     
-    # Test 4: Search entry points
+    # Test 3: Search entry points
     from mcp_internet.tools.search import deep_search, search_web, smart_search
     assert callable(search_web) and callable(smart_search) and callable(deep_search)
     print("✅ Search entry points: PASS")
     
-    # Test 5: Table formatting
+    # Test 4: Table formatting
     from mcp_internet.utils.extractors import tables_to_markdown
     tables = [{"headers": ["Movie", "Rating"], "rows": [["Movie A", "8.5"], ["Movie B", "7.2"]]}]
     md = tables_to_markdown(tables)

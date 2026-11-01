@@ -68,10 +68,7 @@ async def debug():
 
     # Step 4: Test smart_search
     print("\n--- Step 4: smart_search output ---")
-    from mcp_internet.utils.cache import cache_clear
-    await cache_clear()  # Clear cache for fresh results
-    
-    from mcp_internet.tools.smart_search import smart_search
+    from mcp_internet.tools.search import smart_search
     result = await smart_search(query, max_sources=3)
     print(f"smart_search output length: {len(result)} chars")
     print(f"\n{result[:2000]}")

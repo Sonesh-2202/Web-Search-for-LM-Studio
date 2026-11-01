@@ -46,6 +46,46 @@ def extract_opengraph(soup: BeautifulSoup) -> dict:
     return og
 
 
+def extract_page_dates(soup: BeautifulSoup) -> tuple[str, str]:
+    """Read article/page publication metadata without guessing from page text."""
+    published_keys = {
+        "article:published_time", "date", "datepublished", "publishdate",
+        "pubdate", "dc.date", "dc.date.issued", "parsely-pub-date",
+        "sailthru.date", "datepublished",
+    }
+    modified_keys = {
+        "article:modified_time", "datemodified", "last-modified",
+        "lastmod", "dc.date.modified", "parsely-modified-date",
+    }
+    published = modified = ""
+
+    for meta in soup.find_all("meta"):
+        key = str(meta.get("property") or meta.get("name") or meta.get("itemprop") or "").strip().lower()
+        value = str(meta.get("content") or "").strip()
+        if not value:
+            continue
+        if not published and key in published_keys:
+            published = value
+        elif not modified and key in modified_keys:
+            modified = value
+
+    for time_tag in soup.find_all("time"):
+        value = str(time_tag.get("datetime") or time_tag.get_text(" ", strip=True)).strip()
+        itemprop = str(time_tag.get("itemprop") or "").strip().lower()
+        if value and not published and itemprop in {"datepublished", "datecreated"}:
+            published = value
+        elif value and not modified and itemprop == "datemodified":
+            modified = value
+        elif value and not published and not itemprop:
+            # A semantic <time> in article metadata is useful, but do not
+            # promote arbitrary timestamps in page content to publication dates.
+            parent_types = str(time_tag.parent.get("itemtype", "")) if time_tag.parent else ""
+            if "Article" in parent_types or "NewsArticle" in parent_types:
+                published = value
+
+    return published, modified
+
+
 def extract_html_tables(soup: BeautifulSoup, max_tables: int = 3, max_rows: int = 25) -> list[dict]:
     """
     Extract HTML tables and convert to structured data.
@@ -348,7 +388,17 @@ def extract_structured_data(html: str, url: str) -> dict:
     try:
         soup = BeautifulSoup(html, "lxml")
         extractor = get_extractor(url)
-        return extractor(soup, url)
+        result = extractor(soup, url)
+        page_published, page_modified = extract_page_dates(soup)
+        # Generic Schema.org datePublished describes the page/article. Domain
+        # extractors such as IMDb use date_published for a film's release date.
+        if not page_published and extractor is extract_generic:
+            page_published = str(result.get("datePublished", ""))
+        if page_published:
+            result["publication_date"] = page_published
+        if page_modified:
+            result["modified_date"] = page_modified
+        return result
     except Exception as e:
         logger.error(f"Extraction error for {url}: {e}")
         return {"source": url, "error": str(e)}
@@ -375,6 +425,13 @@ def format_extracted_data(data: dict) -> str:
         lines.append(f"*Source: {source}*\n")
     else:
         lines.append(f"### Data from {source}\n")
+
+    if data.get("publication_date"):
+        lines.append(f"- **Page published:** {data['publication_date']}")
+    if data.get("modified_date"):
+        lines.append(f"- **Page updated:** {data['modified_date']}")
+    if data.get("publication_date") or data.get("modified_date"):
+        lines.append("")
     
     # Description/summary
     for field in ["description", "summary", "headline"]:

@@ -5,9 +5,9 @@ This server provides internet access tools for local LLMs in LM Studio.
 Run with: uv run python -m mcp_internet.server
 
 Features:
-- search_web: Web search with optional deep content extraction
-- Result caching for performance
-- Structured output (markdown tables, bullet points)
+- Fresh search with multi-source page extraction
+- Current time context included in search and news results
+- Structured output with source URLs
 - User-agent rotation and rate limiting
 """
 
@@ -33,16 +33,20 @@ if sys.platform == "win32":
 mcp = FastMCP("mcp-internet")
 
 
+def _with_fetch_timestamp(label: str, result: str) -> str:
+    """Attach the local/UTC retrieval time to live data without another tool call."""
+    from .tools.time import get_current_datetime as _get_datetime
+    return f"{label} at {_get_datetime()}\n\n{result}"
+
+
 # =============================================================================
 # SEARCH TOOLS
 # =============================================================================
 @mcp.tool()
 async def search_web(query: str, num_results: int = 10, deep_search: bool = False) -> str:
-    """
-    Search the internet using DuckDuckGo.
-    
-    Returns search result links with snippets. Set deep_search=True to also
-    fetch and extract content from the top results for detailed information.
+    """Quickly find current web links and snippets from a fresh search.
+
+    Use smart_search for an answer that needs evidence from page content.
     
     Args:
         query: The search query (person, topic, question, anything)
@@ -55,9 +59,10 @@ async def search_web(query: str, num_results: int = 10, deep_search: bool = Fals
 
 @mcp.tool()
 async def smart_search(query: str, max_sources: int = 3) -> str:
-    """Search the web and extract content from the top matching pages.
+    """Always use for real-world factual answers.
 
-    Use this for most web questions. Use deep_search for broader research.
+    Searches afresh, reads top source pages in parallel, and includes current
+    local/UTC time context. Use deep_search when broader coverage is needed.
     """
     from .tools.search import smart_search as _smart_search
     return await _smart_search(query, max(1, min(max_sources, 8)))
@@ -65,11 +70,7 @@ async def smart_search(query: str, max_sources: int = 3) -> str:
 
 @mcp.tool()
 async def deep_search(query: str, num_sources: int = 5) -> str:
-    """
-    Deep research — searches and scrapes multiple pages for comprehensive results.
-    
-    Use this when you need thorough, detailed information from multiple sources.
-    Takes longer but returns extracted content from each page, not just links.
+    """Do fresh, broader research and read multiple source pages in parallel.
     
     Args:
         query: Research topic or question
@@ -77,31 +78,6 @@ async def deep_search(query: str, num_sources: int = 5) -> str:
     """
     from .tools.search import deep_search as _deep
     return await _deep(query, min(num_sources, 8))
-
-
-@mcp.tool()
-async def quick_lookup(query: str) -> str:
-    """
-    Quick info lookup - searches and fetches content from top result.
-    
-    Args:
-        query: What to look up (person, topic, etc.)
-    """
-    from .tools.search import quick_lookup as _lookup
-    return await _lookup(query)
-
-
-@mcp.tool()
-async def search_site(query: str, site: str) -> str:
-    """
-    Search within a specific website.
-    
-    Args:
-        query: What to search for
-        site: Website domain (e.g., 'linkedin.com', 'instagram.com')
-    """
-    from .tools.search import search_site as _search_site
-    return await _search_site(query, site)
 
 
 # =============================================================================
@@ -123,7 +99,7 @@ async def read_webpage(url: str, max_length: int = 5000) -> str:
         max_length: Maximum characters (default: 5000)
     """
     from .tools.webpage import read_webpage as _read
-    return await _read(url, max_length)
+    return _with_fetch_timestamp("Page fetched", await _read(url, max_length))
 
 
 @mcp.tool()
@@ -136,7 +112,7 @@ async def read_pdf(url: str, max_pages: int = 5) -> str:
         max_pages: Maximum pages to extract (default: 5)
     """
     from .tools.pdf_reader import read_pdf as _read_pdf
-    return await _read_pdf(url, max_pages, 5000)
+    return _with_fetch_timestamp("PDF fetched", await _read_pdf(url, max_pages, 5000))
 
 
 # =============================================================================
@@ -144,15 +120,15 @@ async def read_pdf(url: str, max_pages: int = 5) -> str:
 # =============================================================================
 @mcp.tool()
 async def get_news(topic: str = "world", count: int = 5) -> str:
-    """
-    Get latest news headlines.
+    """Fetch fresh headlines and include the current local/UTC fetch time.
     
     Args:
         topic: 'world', 'technology', 'business', etc. or search query
         count: Number of headlines (default: 5)
     """
     from .tools.news import get_news as _news
-    return await _news(topic, min(count, 10))
+    news = await _news(topic, min(count, 10))
+    return _with_fetch_timestamp("News fetched", news)
 
 
 @mcp.tool()
@@ -166,20 +142,8 @@ async def search_reddit(query: str, subreddit: str = "", num_results: int = 5) -
         num_results: Number of results (default: 5)
     """
     from .tools.reddit import search_reddit as _search_reddit
-    return await _search_reddit(query, subreddit, min(num_results, 10), "relevance")
-
-
-@mcp.tool()
-async def search_twitter(query: str, num_results: int = 5) -> str:
-    """
-    Search Twitter/X for tweets.
-    
-    Args:
-        query: Search query
-        num_results: Number of tweets (default: 5)
-    """
-    from .tools.twitter import search_twitter as _search_twitter
-    return await _search_twitter(query, min(num_results, 10))
+    result = await _search_reddit(query, subreddit, min(num_results, 10), "relevance")
+    return _with_fetch_timestamp("Reddit results fetched", result)
 
 
 # =============================================================================
@@ -195,7 +159,8 @@ async def search_youtube(query: str, num_results: int = 5) -> str:
         num_results: Number of results (default: 5)
     """
     from .tools.youtube import search_youtube as _search_yt
-    return await _search_yt(query, min(num_results, 10))
+    result = await _search_yt(query, min(num_results, 10))
+    return _with_fetch_timestamp("YouTube results fetched", result)
 
 
 @mcp.tool()
@@ -207,7 +172,7 @@ async def get_video_info(url: str) -> str:
         url: YouTube video URL or video ID
     """
     from .tools.youtube import get_video_info as _get_video
-    return await _get_video(url)
+    return _with_fetch_timestamp("Video details fetched", await _get_video(url))
 
 
 # =============================================================================
@@ -224,7 +189,8 @@ async def search_github(query: str, num_results: int = 5, language: str = "") ->
         language: Filter by language (e.g., 'python')
     """
     from .tools.github import search_github as _search_gh
-    return await _search_gh(query, min(num_results, 10), language, "stars")
+    result = await _search_gh(query, min(num_results, 10), language, "stars")
+    return _with_fetch_timestamp("GitHub results fetched", result)
 
 
 @mcp.tool()
@@ -236,7 +202,7 @@ async def get_repo_info(repo: str) -> str:
         repo: Repository as 'owner/repo' (e.g., 'microsoft/vscode')
     """
     from .tools.github import get_repo_info as _get_repo
-    return await _get_repo(repo)
+    return _with_fetch_timestamp("Repository details fetched", await _get_repo(repo))
 
 
 # =============================================================================
@@ -251,189 +217,27 @@ async def get_weather(location: str) -> str:
         location: City name (e.g., "Tokyo", "New York")
     """
     from .tools.weather import get_weather as _weather
-    return await _weather(location)
+    return _with_fetch_timestamp("Forecast fetched", await _weather(location))
 
 
 @mcp.tool()
-async def get_current_time(location: str = "UTC") -> str:
-    """
-    Get current time for a timezone or city.
-    
-    Args:
-        location: Timezone or city name (e.g., "Tokyo", "America/New_York")
-    """
-    from .tools.time import get_current_time as _time
-    return await _time(location)
+async def get_current_datetime(location: str = "local") -> str:
+    """Get the current local date/time and UTC timestamp from the system clock.
 
-
-# =============================================================================
-# TRANSLATION & MATH
-# =============================================================================
-@mcp.tool()
-async def translate_text(text: str, to_language: str = "english") -> str:
+    Use for direct date/time questions. Fresh search and news results already
+    include a timestamp. Defaults to the server's local timezone; pass a city
+    or IANA timezone (such as Asia/Kolkata) for another location. No network call.
     """
-    Translate text to another language.
-    
-    Args:
-        text: Text to translate
-        to_language: Target language (e.g., 'spanish', 'japanese')
-    """
-    from .tools.translator import translate_text as _translate
-    return await _translate(text, to_language, "auto")
-
-
-@mcp.tool()
-async def calculate(expression: str) -> str:
-    """
-    Evaluate a math expression safely.
-    
-    Args:
-        expression: Math expression (e.g., "sqrt(16)", "15% of 200")
-    """
-    from .tools.math_tools import calculate as _calc
-    return await _calc(expression)
-
-
-# =============================================================================
-# URL & IP TOOLS
-# =============================================================================
-@mcp.tool()
-async def shorten_url(url: str) -> str:
-    """
-    Create a shortened URL.
-    
-    Args:
-        url: The long URL to shorten
-    """
-    from .tools.urls import shorten_url as _shorten
-    return await _shorten(url)
-
-
-@mcp.tool()
-async def get_my_ip() -> str:
-    """Get your public IP address with location info."""
-    from .tools.ip_tools import get_my_ip as _my_ip
-    return await _my_ip()
-
-
-@mcp.tool()
-async def geolocate_ip(ip: str) -> str:
-    """
-    Get location info for an IP address.
-    
-    Args:
-        ip: IP address to look up
-    """
-    from .tools.ip_tools import geolocate_ip as _geolocate
-    return await _geolocate(ip)
-
-
-# =============================================================================
-# QR CODES
-# =============================================================================
-@mcp.tool()
-async def generate_qr(content: str, size: int = 200) -> str:
-    """
-    Generate a QR code for text or URL.
-    
-    Args:
-        content: Text or URL to encode
-        size: Size in pixels (default: 200)
-    """
-    from .tools.qr_code import generate_qr as _gen_qr
-    return await _gen_qr(content, size)
-
-
-@mcp.tool()
-async def generate_wifi_qr(ssid: str, password: str, security: str = "WPA") -> str:
-    """
-    Generate a WiFi QR code.
-    
-    Args:
-        ssid: WiFi network name
-        password: WiFi password
-        security: 'WPA', 'WEP', or 'nopass'
-    """
-    from .tools.qr_code import generate_wifi_qr as _wifi_qr
-    return await _wifi_qr(ssid, password, security, False)
-
-
-# =============================================================================
-# EMAIL
-# =============================================================================
-@mcp.tool()
-async def send_email(to_email: str, subject: str, body: str) -> str:
-    """
-    Send an email (requires SMTP config via env vars).
-    
-    Args:
-        to_email: Recipient email
-        subject: Email subject
-        body: Email body text
-    """
-    from .tools.email_sender import send_email as _send_email
-    return await _send_email(to_email, subject, body, "", 587, "", "")
-
-
-# =============================================================================
-# CACHE MANAGEMENT
-# =============================================================================
-@mcp.tool()
-async def clear_cache(category: str = "") -> str:
-    """
-    Clear the search/page cache.
-    
-    Args:
-        category: Optional - clear only a specific category ('search', 'page', 'profile').
-                  Leave empty to clear all cached data.
-    """
-    from .utils.cache import cache_clear
-    count = await cache_clear(category if category else None)
-    if category:
-        return f"✅ Cleared {count} cached entries in category '{category}'."
-    return f"✅ Cleared {count} cached entries (all categories)."
+    from .tools.time import get_current_datetime as _get_datetime
+    return _get_datetime(location)
 
 
 # =============================================================================
 # Server Entry Point
 # =============================================================================
-async def warmup():
-    """Pre-initialize HTTP client to avoid cold-start delays."""
-    try:
-        from .utils.http_client import get_client
-        client = await get_client()
-        # Make a real request to fully initialize connection pool
-        try:
-            await client.get("https://html.duckduckgo.com/html/", timeout=10.0)
-            logger.info("HTTP client warmed up successfully")
-        except Exception:
-            logger.info("HTTP client initialized")
-    except Exception as e:
-        logger.warning(f"Warmup failed: {e}")
-    
-    # Initialize cache database
-    try:
-        from .utils.cache import _ensure_db
-        await _ensure_db()
-        logger.info("Cache database ready")
-    except Exception as e:
-        logger.warning(f"Cache init: {e}")
-
-
 def main():
     """Run the MCP server using STDIO transport."""
-    import asyncio
-    
     logger.info("Starting MCP Internet Server v3.0...")
-    
-    # Warmup components
-    try:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        loop.run_until_complete(warmup())
-    except Exception as e:
-        logger.warning(f"Warmup error: {e}")
-    
     mcp.run(transport="stdio")
 
 
