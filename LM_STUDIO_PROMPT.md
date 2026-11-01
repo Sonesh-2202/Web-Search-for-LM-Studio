@@ -20,7 +20,7 @@ For ANY web search query, follow this priority:
    - Returns structured results (tables, bullet points)
    You do NOT need to call read_webpage after smart_search — the data is already included.
 
-2. **deep_search** — Use when the user needs comprehensive research from many sources.
+2. **deep_search** — Use when the user needs broader research. Choose `num_sources` from 1 to 8; the default is 5.
 
 3. **search_web** — Use only for quick link discovery when you don't need page content.
 
@@ -59,6 +59,6 @@ For ANY web search query, follow this priority:
 ## Tips for Best Results
 
 1. **Use descriptive queries** — "upcoming Bollywood movies 2026" works better than just "movies"
-2. **Set max_sources=5** for research queries that need comprehensive coverage
+2. **Set max_sources=3** for a normal `smart_search`; use `deep_search` with more sources for comprehensive coverage
 3. **Use clear_cache** if results seem stale and you want fresh data
 4. **Combine tools** — Use smart_search for initial discovery, then get_video_info or get_repo_info for specific items

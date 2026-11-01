@@ -54,6 +54,16 @@ async def search_web(query: str, num_results: int = 10, deep_search: bool = Fals
 
 
 @mcp.tool()
+async def smart_search(query: str, max_sources: int = 3) -> str:
+    """Search the web and extract content from the top matching pages.
+
+    Use this for most web questions. Use deep_search for broader research.
+    """
+    from .tools.search import smart_search as _smart_search
+    return await _smart_search(query, max(1, min(max_sources, 8)))
+
+
+@mcp.tool()
 async def deep_search(query: str, num_sources: int = 5) -> str:
     """
     Deep research — searches and scrapes multiple pages for comprehensive results.

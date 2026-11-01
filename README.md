@@ -8,7 +8,7 @@
 
 > **Give your local LLMs the power of the internet — with real data extraction, not just links!** 🚀
 
-An open-source Model Context Protocol (MCP) server providing **25 internet tools** for local Large Language Models. The v3.0 upgrade adds **intelligent search with auto-extraction**, **multi-source aggregation**, **result caching**, and **structured output** — making your AI return actual data instead of raw links.
+An open-source Model Context Protocol (MCP) server providing **25 tools** for local Large Language Models. It combines DuckDuckGo search, page extraction, result caching, and structured output so your AI can work with page content as well as links.
 
 Seamlessly deployable across **Windows, macOS, and Linux**. **No API keys required!**
 
@@ -18,12 +18,12 @@ Seamlessly deployable across **Windows, macOS, and Linux**. **No API keys requir
 
 | Feature | Before (v2.0) | After (v3.0) |
 |---------|---------------|--------------|
-| **Search Results** | Links + snippets only | Full data extraction from pages |
-| **Tool Calls Needed** | 5-10+ per query | 1-2 per query |
-| **Output Format** | Plain text | Markdown tables, bullet points |
+| **Search Results** | Links + snippets | Optional page extraction from search results |
+| **Tool Calls Needed** | Multiple calls | One search-and-extract call for common queries |
+| **Output Format** | Plain text | Structured text and extracted tables where available |
 | **Caching** | None | SQLite with TTL (30min-24h) |
 | **Rate Limiting** | None | Per-domain throttling |
-| **Multi-Source** | Manual per source | Auto-aggregation from top results |
+| **Multi-Source** | Manual per source | Extraction from selected top results |
 | **Content Extraction** | Generic text only | Domain-aware (Wikipedia, IMDb, LinkedIn) |
 
 ### New Tools
@@ -50,8 +50,8 @@ Seamlessly deployable across **Windows, macOS, and Linux**. **No API keys requir
 
 | Category | Tools |
 |----------|-------|
-| 🌟 **Smart Search** | `smart_search`, `deep_search` |
-| 🔍 **Basic Search** | `search_web`, `quick_lookup`, `search_site` |
+| 🌟 **Search + Extraction** | `smart_search`, `deep_search` |
+| 🔍 **Search** | `search_web`, `quick_lookup`, `search_site` |
 | 📄 **Reading** | `read_webpage`, `read_pdf` |
 | 📰 **News/Social** | `get_news`, `search_reddit`, `search_twitter` |
 | 🎬 **YouTube** | `search_youtube`, `get_video_info` |
@@ -149,8 +149,7 @@ mcp-internet/
 └── src/mcp_internet/
     ├── server.py               # Entry point — 25 MCP tools
     ├── tools/
-    │   ├── smart_search.py     # 🌟 Intelligent search + extraction
-    │   ├── search.py           # Basic DuckDuckGo search
+    │   ├── search.py           # DuckDuckGo search + extraction flows
     │   ├── webpage.py          # Page reader with structured extraction
     │   ├── news.py             # News headlines
     │   ├── youtube.py          # YouTube search & video info
@@ -169,18 +168,16 @@ mcp-internet/
 ```
 User Query → smart_search
     ├── 1. Check cache (return if fresh)
-    ├── 2. Optimize query & classify (person/movie/news/tech/general)
-    ├── 3. Search DuckDuckGo (HTML scraping + ddgs fallback)
-    ├── 4. Prioritize results by domain authority
-    ├── 5. Scrape top 3 pages in parallel (asyncio.gather)
-    ├── 6. Apply domain-specific extractors
+    ├── 2. Search DuckDuckGo (HTML scraping + ddgs fallback)
+    ├── 3. Read up to the requested number of result pages
+    ├── 4. Apply domain-specific extractors where available
     │       ├── Wikipedia → infobox, summary, key facts
     │       ├── IMDb → titles, ratings, cast, genres
     │       ├── LinkedIn → name, role, skills, experience
     │       └── Generic → JSON-LD, OpenGraph, tables
-    ├── 7. Aggregate & format as structured markdown
-    ├── 8. Cache result
-    └── 9. Return comprehensive response
+    ├── 5. Format search results and extracted content
+    ├── 6. Cache result
+    └── 7. Return the response
 ```
 
 ---

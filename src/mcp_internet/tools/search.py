@@ -295,6 +295,11 @@ async def search_site(query: str, site: str) -> str:
     return await search_web(site_query, 10, False)
 
 
+async def smart_search(query: str, max_sources: int = 3) -> str:
+    """Search the web and extract content from the top matching sources."""
+    return await deep_search(query, num_sources=max_sources)
+
+
 async def deep_search(query: str, num_sources: int = 5) -> str:
     """
     Deep web search — searches and scrapes multiple pages for comprehensive results.

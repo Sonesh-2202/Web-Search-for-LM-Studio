@@ -37,13 +37,10 @@ async def test():
     assert len(_USER_AGENTS) >= 5
     print(f"✅ HTTP client: PASS ({len(_USER_AGENTS)} UAs, rate limiter ready)")
     
-    # Test 4: Query optimization
-    from mcp_internet.tools.smart_search import optimize_query, classify_query
-    assert optimize_query("search for upcoming movies") == "upcoming movies"
-    assert classify_query("upcoming Bollywood movies 2026") == "entertainment"
-    assert classify_query("LinkedIn profile of Sundar Pichai") == "person"
-    assert classify_query("latest news about AI") == "news"
-    print("✅ Query intelligence: PASS")
+    # Test 4: Search entry points
+    from mcp_internet.tools.search import deep_search, search_web, smart_search
+    assert callable(search_web) and callable(smart_search) and callable(deep_search)
+    print("✅ Search entry points: PASS")
     
     # Test 5: Table formatting
     from mcp_internet.utils.extractors import tables_to_markdown
