@@ -92,7 +92,8 @@ async def test_jailer_event_status_unverified_without_post_date_evidence(monkeyp
 
     monkeypatch.setattr(search, "_search", old_announcement_only)
     result = await search.search_web("Search the web about Jailer 2 and tell me", 5)
-    assert "2026-11-01T18:00:00+05:30" in result
+    expected_local_time = FixedDateTime.now().astimezone().isoformat(timespec="seconds")
+    assert expected_local_time in result
     assert "event status: unverified" in result.lower()
     assert "july 2025" in result.lower()
     assert "it is upcoming" not in result.lower()
