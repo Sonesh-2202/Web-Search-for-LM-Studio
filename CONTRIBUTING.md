@@ -13,7 +13,7 @@ Thanks for helping improve Web Search for LM Studio LLMS. Small, focused pull re
    ```bash
    uv sync --extra dev
    uv run --extra dev pytest -q
-   uv run --extra dev ruff check src tests
+   uv run --extra dev ruff check src tests scripts
    uv build
    ```
 

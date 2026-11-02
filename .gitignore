@@ -35,6 +35,7 @@ ENV/
 .pytest_cache/
 .coverage
 htmlcov/
+pytest-results.xml
 
 # Environment variables
 .env

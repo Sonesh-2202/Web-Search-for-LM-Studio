@@ -139,7 +139,7 @@ Run the offline test suite and configured lint checks with:
 
 ```bash
 uv run --extra dev pytest
-uv run --extra dev ruff check src tests
+uv run --extra dev ruff check src tests scripts
 ```
 
 The normal test suite uses mocked responses and does not require network access or credentials.
