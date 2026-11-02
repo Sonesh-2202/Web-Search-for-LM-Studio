@@ -7,7 +7,7 @@
 
 An open-source Model Context Protocol server that gives LM Studio and other MCP clients tools for fresh web search, source-page reading, news, weather, and selected public data. The package and executable remain `mcp-internet`. It uses the local machine clock and includes a compact retrieval timestamp in research results, so a model can reason about “today” without a separate clock call on every question.
 
-Search results are evidence leads, not guaranteed truth. The server returns source URLs and page content when a site allows access; the model should cite those sources and say when evidence is missing or contradictory. See the [LM Studio prompt template](LM_STUDIO_PROMPT.md) for recommended tool-use instructions.
+Search results are evidence leads, not guaranteed truth. The server returns source URLs and page content when a site allows access; the model should cite those sources and say when evidence is missing or contradictory. The [LM Studio prompt](LM_STUDIO_PROMPT.md) sets a short default answer (80 words; 50 for broad “tell me about” questions), requires citations, and limits claims to returned evidence. Replace the prompt saved in LM Studio and start a new chat for the change to apply.
 
 ## Features
 

@@ -89,4 +89,4 @@ The project requires Python 3.10+, `mcp[cli]`, `httpx[http2]`, BeautifulSoup, lx
 
 ## LM Studio model instructions
 
-Use [LM_STUDIO_PROMPT.md](LM_STUDIO_PROMPT.md) as the system prompt. It tells the model to search before factual answers, distinguish fetched time from publication time, cite only returned URLs, and state when the available evidence is incomplete.
+Use [LM_STUDIO_PROMPT.md](LM_STUDIO_PROMPT.md) as the system prompt. It defaults to brief answers, requires citations to returned URLs, distinguishes retrieval time from publication time, and says when the available evidence is incomplete. Replace the prompt saved in LM Studio and start a new chat; editing the file does not update LM Studio automatically.
