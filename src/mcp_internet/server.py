@@ -1,5 +1,5 @@
 """
-MCP Internet Server v3.0 - Main Entry Point
+Web Search for LM Studio LLMS - MCP server entry point
 
 This server provides internet access tools for local LLMs in LM Studio.
 Run with: uv run python -m mcp_internet.server
@@ -12,9 +12,13 @@ Features:
 """
 
 import logging
+import re
 import sys
+from contextlib import asynccontextmanager
 
 from mcp.server.fastmcp import FastMCP
+
+from . import PRODUCT_NAME, __version__
 
 # Configure logging to stderr (important for MCP STDIO transport)
 logging.basicConfig(
@@ -30,7 +34,16 @@ if sys.platform == "win32":
     sys.stderr.reconfigure(encoding='utf-8', errors='replace')
 
 # Initialize FastMCP server
-mcp = FastMCP("mcp-internet")
+@asynccontextmanager
+async def _lifespan(_server):
+    try:
+        yield
+    finally:
+        from .utils.http_client import close_client
+        await close_client()
+
+
+mcp = FastMCP(PRODUCT_NAME, lifespan=_lifespan)
 
 
 def _with_fetch_timestamp(label: str, result: str) -> str:
@@ -44,11 +57,11 @@ def _with_fetch_timestamp(label: str, result: str) -> str:
 # =============================================================================
 @mcp.tool()
 async def search_web(query: str, num_results: int = 10, deep_search: bool = False) -> str:
-    """Find web links and snippets from a fresh search with today's date attached.
+    """Find web links and snippets using a fresh search with time context when relevant.
 
-    Every query is anchored to the local current date and the result includes
-    a local/UTC retrieval timestamp. Use smart_search to verify factual claims
-    against fetched source pages.
+    Time-sensitive queries include the server's local date; timeless and
+    explicitly historical queries preserve their original intent. The result
+    includes a server retrieval timestamp. Use smart_search to inspect sources.
     
     Args:
         query: The search query (person, topic, question, anything)
@@ -56,33 +69,35 @@ async def search_web(query: str, num_results: int = 10, deep_search: bool = Fals
         deep_search: Fetch and extract content from top results for details
     """
     from .tools.search import search_web as _search
-    return await _search(query, min(num_results, 20), deep_search)
+    return await _search(query, num_results, deep_search)
 
 
 @mcp.tool()
-async def smart_search(query: str, max_sources: int = 3) -> str:
-    """Always use before answering a real-world factual question.
+async def smart_search(query: str, max_sources: int = 2) -> str:
+    """Use before answering a current real-world factual question.
 
-    Searches afresh with the current local date added to the query, reads top
-    source pages in parallel, and includes a local/UTC timestamp. Use
+    Searches afresh, adds date context to time-sensitive queries, reads top
+    source pages in parallel, and includes the server retrieval timestamp. Use
     deep_search when broader coverage is needed. For releases or events whose
     scheduled date has passed, verify with post-date evidence before saying
-    they happened or describing them as upcoming.
+    they happened or describing them as upcoming. For a short international
+    team matchup (for example, India vs New Zealand), infer a request for recent
+    results and fixtures unless the user asks for a country comparison.
     """
     from .tools.search import smart_search as _smart_search
-    return await _smart_search(query, max(1, min(max_sources, 8)))
+    return await _smart_search(query, max_sources)
 
 
 @mcp.tool()
 async def deep_search(query: str, num_sources: int = 5) -> str:
-    """Do fresh, broader research with today's date in the query and read multiple source pages.
+    """Do fresh, broader research with relevant date context and read multiple source pages.
     
     Args:
         query: Research topic or question
         num_sources: Number of pages to scrape and analyze (1-8, default: 5)
     """
     from .tools.search import deep_search as _deep
-    return await _deep(query, min(num_sources, 8))
+    return await _deep(query, num_sources)
 
 
 # =============================================================================
@@ -147,7 +162,8 @@ async def search_reddit(query: str, subreddit: str = "", num_results: int = 5) -
         num_results: Number of results (default: 5)
     """
     from .tools.reddit import search_reddit as _search_reddit
-    result = await _search_reddit(query, subreddit, min(num_results, 10), "relevance")
+    sort = "new" if re.search(r"\b(latest|newest|recent|most recent)\b", query, re.IGNORECASE) else "relevance"
+    result = await _search_reddit(query, subreddit, min(num_results, 10), sort)
     return _with_fetch_timestamp("Reddit results fetched", result)
 
 
@@ -194,7 +210,8 @@ async def search_github(query: str, num_results: int = 5, language: str = "") ->
         language: Filter by language (e.g., 'python')
     """
     from .tools.github import search_github as _search_gh
-    result = await _search_gh(query, min(num_results, 10), language, "stars")
+    sort = "updated" if re.search(r"\b(latest|newest|recent|most recent)\b", query, re.IGNORECASE) else "stars"
+    result = await _search_gh(query, min(num_results, 10), language, sort)
     return _with_fetch_timestamp("GitHub results fetched", result)
 
 
@@ -242,8 +259,17 @@ async def get_current_datetime(location: str = "local") -> str:
 # =============================================================================
 def main():
     """Run the MCP server using STDIO transport."""
-    logger.info("Starting MCP Internet Server v3.0...")
-    mcp.run(transport="stdio")
+    logger.info("Starting %s v%s over stdio", PRODUCT_NAME, __version__)
+    try:
+        mcp.run(transport="stdio")
+    except Exception as exc:
+        logger.error(
+            "Could not start %s (%s). Check that dependencies are installed and "
+            "that the LM Studio command and working directory point to this checkout.",
+            PRODUCT_NAME,
+            type(exc).__name__,
+        )
+        raise SystemExit(1) from None
 
 
 if __name__ == "__main__":

@@ -5,6 +5,8 @@ Uses Reddit's JSON API (no authentication required for public content).
 """
 
 import logging
+import re
+from datetime import datetime, timezone
 from urllib.parse import quote_plus
 
 from ..utils.http_client import fetch_json
@@ -33,7 +35,13 @@ async def search_reddit(
     if not query.strip():
         return "❌ Error: Please provide a search query."
     
+    if len(query) > 500 or not isinstance(num_results, int) or isinstance(num_results, bool) or num_results < 1:
+        return "❌ Error: query must be at most 500 characters and num_results must be 1-10."
     num_results = min(num_results, 10)
+    if subreddit and not re.fullmatch(r"[A-Za-z0-9_]{1,21}", subreddit.removeprefix("r/")):
+        return "❌ Error: Invalid subreddit name."
+    if sort not in {"relevance", "hot", "top", "new", "comments"}:
+        return "❌ Error: sort must be relevance, hot, top, new, or comments."
     encoded_query = quote_plus(query)
     
     # Build URL
@@ -67,12 +75,15 @@ async def search_reddit(
         num_comments = post_data.get("num_comments", 0)
         permalink = post_data.get("permalink", "")
         selftext = post_data.get("selftext", "")[:200]
+        created = post_data.get("created_utc")
+        created_at = datetime.fromtimestamp(created, timezone.utc).isoformat(timespec="seconds") if isinstance(created, (int, float)) else "unknown"
         
         post_url = f"https://reddit.com{permalink}" if permalink else ""
         
         output += f"\n{i}. {title}\n"
         output += f"   📍 r/{subreddit_name} | ⬆️ {score} | 💬 {num_comments} comments\n"
         output += f"   🔗 {post_url}\n"
+        output += f"   Created: {created_at} (UTC)\n"
         
         if selftext:
             # Clean up the text preview
@@ -103,6 +114,10 @@ async def get_subreddit_posts(
     
     # Remove r/ prefix if provided
     subreddit = subreddit.replace("r/", "").strip()
+    if not re.fullmatch(r"[A-Za-z0-9_]{1,21}", subreddit) or sort not in {"hot", "new", "top", "rising"}:
+        return "❌ Error: Invalid subreddit name or sort value."
+    if not isinstance(num_results, int) or isinstance(num_results, bool) or num_results < 1:
+        return "❌ Error: num_results must be 1-10."
     num_results = min(num_results, 10)
     
     url = f"https://www.reddit.com/r/{subreddit}/{sort}.json?limit={num_results}"

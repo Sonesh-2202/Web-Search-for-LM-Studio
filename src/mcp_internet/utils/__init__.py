@@ -1,9 +1,9 @@
-"""Utility modules for MCP Internet Server."""
+"""Shared utility modules for Web Search for LM Studio LLMS."""
 
-from .http_client import fetch_url, fetch_json, fetch_multiple
+from .http_client import fetch_json, fetch_multiple, fetch_url
 
 __all__ = [
-    "fetch_url",
     "fetch_json",
     "fetch_multiple",
+    "fetch_url",
 ]

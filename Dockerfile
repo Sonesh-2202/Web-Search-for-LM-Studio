@@ -9,12 +9,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PYTHONIOENCODING=utf-8
 
-# Install dependencies
-COPY pyproject.toml .
-RUN pip install --no-cache-dir "mcp[cli]>=1.2.0" httpx beautifulsoup4 lxml "ddgs>=9.0.0"
-
-# Copy source code
+# Install the same declared runtime dependencies as the Python project.
+COPY pyproject.toml README.md ./
 COPY src/ ./src/
+RUN pip install --no-cache-dir .
 
 # Set Python path
 ENV PYTHONPATH=/app/src

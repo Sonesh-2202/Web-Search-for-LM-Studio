@@ -1,8 +1,7 @@
 """Local current date/time from the machine clock, with timezone support."""
 
 from datetime import datetime, timezone
-from zoneinfo import ZoneInfo, available_timezones
-
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 CITY_TIMEZONES = {
     "new york": "America/New_York",
@@ -51,8 +50,17 @@ def find_timezone(location: str) -> str | None:
     value = location.strip()
     if value.lower() in CITY_TIMEZONES:
         return CITY_TIMEZONES[value.lower()]
-    if value in available_timezones():
+    try:
+        ZoneInfo(value)
         return value
+    except (ZoneInfoNotFoundError, ValueError):
+        # If no timezone database is installed, defer to the formatter so it
+        # can return the actionable tzdata configuration message.
+        try:
+            from zoneinfo import available_timezones
+            available_timezones()
+        except (OSError, RuntimeError):
+            return value
     return None
 
 
@@ -68,7 +76,7 @@ def get_current_datetime(location: str = "local") -> str:
             return f'Unable to find timezone for "{location}". Try a common city or IANA timezone such as Asia/Kolkata.'
         try:
             local_now = datetime.now(ZoneInfo(timezone_name))
-        except Exception:
+        except ZoneInfoNotFoundError:
             return f'Unable to load timezone data for "{timezone_name}". Use the local timezone or install the Python tzdata package.'
         zone_name = timezone_name
 

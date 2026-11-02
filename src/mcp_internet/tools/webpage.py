@@ -37,17 +37,22 @@ REMOVE_PATTERNS = [
 
 def clean_text(text: str) -> str:
     """Clean and normalize text content."""
-    # Remove excessive whitespace
-    text = re.sub(r'\s+', ' ', text)
-    # Remove excessive newlines
-    text = re.sub(r'\n{3,}', '\n\n', text)
-    return text.strip()
+    lines = [re.sub(r"[ \t\xa0]+", " ", line).strip() for line in text.splitlines()]
+    output = []
+    for line in lines:
+        if line:
+            output.append(line)
+        elif output and output[-1] != "":
+            output.append("")
+    return "\n".join(output).strip()
 
 
 def extract_main_content(soup: BeautifulSoup, url: str = "") -> str:
     """Extract the main readable content from parsed HTML."""
     
-    is_linkedin = "linkedin.com" in url.lower()
+    from urllib.parse import urlsplit
+    host = (urlsplit(url).hostname or "").lower()
+    is_linkedin = host == "linkedin.com" or host.endswith(".linkedin.com")
 
     if is_linkedin:
         # LinkedIn public profiles have a <main> tag containing the entire profile
@@ -57,7 +62,7 @@ def extract_main_content(soup: BeautifulSoup, url: str = "") -> str:
                 for element in main_content.find_all(tag):
                     try:
                         element.decompose()
-                    except:
+                    except Exception:
                         pass
             return main_content.get_text(separator='\n', strip=True)
 
@@ -110,6 +115,9 @@ async def read_webpage(url: str, max_length: int = 5000) -> str:
     """
     if not url.strip():
         return "❌ Error: Please provide a URL."
+    if not isinstance(max_length, int) or isinstance(max_length, bool):
+        return "❌ Error: max_length must be an integer from 1 to 20000."
+    max_length = max(1, min(max_length, 20000))
     
     # Add protocol if missing
     if not url.startswith(("http://", "https://")):
@@ -133,13 +141,16 @@ async def read_webpage(url: str, max_length: int = 5000) -> str:
         # Try structured extraction first
         structured_section = ""
         try:
-            from ..utils.extractors import extract_structured_data, format_extracted_data
+            from ..utils.extractors import (
+                extract_structured_data,
+                format_extracted_data,
+            )
             data = extract_structured_data(html, url)
             formatted = format_extracted_data(data)
             if formatted.strip() and len(formatted) > 50:
                 structured_section = f"\n📊 **Structured Data:**\n{formatted}\n"
         except Exception as e:
-            logger.debug(f"Structured extraction failed for {url}: {e}")
+            logger.debug("Structured extraction failed (%s)", type(e).__name__)
         
         # Extract HTML tables as markdown
         tables_section = ""
@@ -156,14 +167,6 @@ async def read_webpage(url: str, max_length: int = 5000) -> str:
         # Extract main content
         content = extract_main_content(soup, url)
         content = clean_text(content)
-        
-        # Calculate available space for content
-        overhead = len(structured_section) + len(tables_section) + 200
-        content_max = max(max_length - overhead, 1000)
-        
-        # Truncate if needed
-        if len(content) > content_max:
-            content = content[:content_max] + "...\n\n[Content truncated]"
         
         # Format output
         output = f"""📄 **{title_text}**
@@ -183,8 +186,11 @@ async def read_webpage(url: str, max_length: int = 5000) -> str:
 
 {content}
 """
+        if len(output) > max_length:
+            marker = "\n[Output truncated]"
+            output = output[:max(0, max_length - len(marker))] + marker[:max_length]
         return output
         
     except Exception as e:
-        logger.error(f"Error parsing webpage: {e}")
+        logger.error("Error parsing webpage (%s)", type(e).__name__)
         return f"❌ Error: Unable to parse content from {url}. The page format may not be supported."

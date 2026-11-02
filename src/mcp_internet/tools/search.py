@@ -10,7 +10,6 @@ from urllib.parse import quote_plus, unquote
 from bs4 import BeautifulSoup
 
 from ..utils.http_client import fetch_url
-from .time import get_current_datetime
 
 logger = logging.getLogger(__name__)
 
@@ -21,30 +20,73 @@ _TIME_SENSITIVE_RE = re.compile(
     r"this (?:week|month|year)|next (?:week|month|year)|yesterday|ytd|as of)\b",
     re.IGNORECASE,
 )
-_DAY_LIMIT_RE = re.compile(r"\b(today|tonight|breaking|last 24 hours?)\b", re.I)
-_WEEK_LIMIT_RE = re.compile(r"\b(news|recent|recently|this week)\b", re.I)
-_SKIP_PAGE_RE = re.compile(r"\.(?:pdf|zip|exe)(?:$|[?#])|youtube\.com/watch|youtu\.be/", re.I)
+_DAY_LIMIT_RE = re.compile(r"\b(today|tonight|breaking|last 24 hours?)\b", re.IGNORECASE)
+_WEEK_LIMIT_RE = re.compile(r"\b(news|recent|recently|this week)\b", re.IGNORECASE)
+_SKIP_PAGE_RE = re.compile(r"\.(?:pdf|zip|exe)(?:$|[?#])|youtube\.com/watch|youtu\.be/", re.IGNORECASE)
+_INTERNATIONAL_TEAMS = (
+    "india", "new zealand", "australia", "england", "pakistan", "south africa",
+    "sri lanka", "bangladesh", "west indies", "afghanistan", "ireland", "zimbabwe",
+)
+_COUNTRY_COMPARISON_RE = re.compile(
+    r"\b(compare|comparison|population|geography|demographics?|econom(?:y|ic)|gdp|culture|history)\b",
+    re.IGNORECASE,
+)
 
 
 def _query_with_date_context(query: str, now: datetime) -> str:
-    """Give every search an explicit as-of date from the server's local clock."""
+    """Add date context only for time-sensitive intent, preserving the topic."""
     as_of = now.strftime("%B %d, %Y")
-    if _TIME_SENSITIVE_RE.search(query):
-        return f"{query} current status as of {as_of}"
+    if _is_historical_query(query) or not _is_time_sensitive_query(query):
+        return query
     return f"{query} as of {as_of}"
 
 
-def _time_filter_for_query(query: str) -> str | None:
+def _is_historical_query(query: str) -> bool:
+    return bool(re.search(r"\b(?:19|20)\d{2}-\d{2}-\d{2}\b|\b(?:in|during|on|from)\s+(?:19|20)\d{2}\b|\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+\d{1,2}?,?\s+(?:19|20)\d{2}\b|\b(?:history|historical|original|when did)\b", query, re.IGNORECASE))
+
+
+def _is_time_sensitive_query(query: str) -> bool:
+    # A bare named film/sequel is commonly a request for current release/status
+    # information. Timeless general subjects remain untouched.
+    return bool(_TIME_SENSITIVE_RE.search(query) or _event_status_query(query) or _is_sports_matchup(query))
+
+
+def _is_sports_matchup(query: str) -> bool:
+    """Treat a terse international team matchup as current sports intent."""
+    if _COUNTRY_COMPARISON_RE.search(query) or not re.search(r"\b(?:vs\.?|versus)\b", query, re.IGNORECASE):
+        return False
+    teams = [name for name in _INTERNATIONAL_TEAMS if re.search(rf"\b{re.escape(name)}\b", query, re.IGNORECASE)]
+    return len(teams) >= 2 and not _is_historical_query(query)
+
+
+def _event_status_query(query: str) -> bool:
+    event_terms = r"\b(?:season\s+\d+|sequel\b|launch\b|release\b|festival\b|tournament\b|concert\b|event\b|premiere\b|scheduled\b|planned\b|upcoming\b|box office\b|streaming\b)"
+    numbered_title = r"\b[A-Z][\w'-]*(?:\s+[A-Z][\w'-]*)*\s+[2-9]\b"
+    return bool(re.search(event_terms, query, re.IGNORECASE) or re.search(numbered_title, query)) and not _is_historical_query(query)
+
+
+def _search_timestamp(now: datetime) -> str:
+    return f"{now.isoformat(timespec='seconds')} (server retrieval time; UTC offset {now.strftime('%z')})"
+
+
+def _time_filter_for_query(query: str, now: datetime | None = None) -> str | None:
     """Apply a narrow recency filter only when the wording asks for it."""
     # Upcoming schedules can be announced months or years in advance; a
     # one-month search window would hide the very evidence the user needs.
-    if re.search(r"\b(upcoming|future|scheduled|expected|planned)\b", query, re.I):
+    if re.search(r"\b(upcoming|future|scheduled|expected|planned)\b", query, re.IGNORECASE):
+        return None
+    if _is_historical_query(query):
+        return None
+    year = re.search(r"\b(20\d{2})\b", query)
+    if year and int(year.group(1)) > (now or datetime.now().astimezone()).year:
         return None
     if _DAY_LIMIT_RE.search(query):
         return "d"
     if _WEEK_LIMIT_RE.search(query):
         return "w"
-    if re.search(r"\b(latest|newest|current|currently|now|recent|recently|released?|release date|box office|streaming|available now)\b", query, re.I):
+    if re.search(r"\b(latest|newest|current|currently|now|recent|recently|released?|release date|box office|streaming|available now)\b", query, re.IGNORECASE):
+        return "m"
+    if _event_status_query(query) or _is_sports_matchup(query):
         return "m"
     return None
 
@@ -55,12 +97,12 @@ def extract_url_from_ddg_redirect(ddg_url: str) -> str:
     return unquote(match.group(1)) if match else ddg_url
 
 
-async def search_duckduckgo_html(query: str, num_results: int = 10, retries: int = 3) -> list[dict]:
+async def search_duckduckgo_html(query: str, num_results: int = 10, retries: int = 1) -> list[dict]:
     """Search DuckDuckGo's HTML interface and parse result titles, URLs, snippets."""
     url = f"https://html.duckduckgo.com/html/?q={quote_plus(query)}"
 
     for attempt in range(retries):
-        html = await fetch_url(url, timeout=15.0, retries=1)
+        html = await fetch_url(url, timeout=8.0, retries=0)
         if not html:
             if attempt + 1 < retries:
                 await asyncio.sleep(0.3 * (attempt + 1))
@@ -86,7 +128,7 @@ async def search_duckduckgo_html(query: str, num_results: int = 10, retries: int
             if results:
                 return results
         except Exception as e:
-            logger.warning("Unable to parse DuckDuckGo results: %s", e)
+            logger.warning("Unable to parse DuckDuckGo results (%s)", type(e).__name__)
 
         if attempt + 1 < retries:
             await asyncio.sleep(0.3 * (attempt + 1))
@@ -106,7 +148,7 @@ async def search_with_ddgs(
         def do_search():
             region = os.environ.get("MCP_SEARCH_REGION", "in-en")
             backends = os.environ.get("MCP_SEARCH_BACKENDS", "auto")
-            return list(DDGS(timeout=12).text(
+            return list(DDGS(timeout=7).text(
                 query,
                 region=region,
                 safesearch="moderate",
@@ -115,9 +157,9 @@ async def search_with_ddgs(
                 backend=backends,
             ))
 
-        return await asyncio.to_thread(do_search)
+        return await asyncio.wait_for(asyncio.to_thread(do_search), timeout=8.0)
     except Exception as e:
-        logger.warning("DDGS fallback error: %s", e)
+        logger.warning("DDGS fallback error (%s)", type(e).__name__)
         return []
 
 
@@ -127,21 +169,51 @@ async def _search(
     timelimit: str | None = None,
 ) -> list[dict]:
     results = await search_with_ddgs(query, num_results, timelimit=timelimit)
+    if timelimit and results:
+        results = [
+            {**item, "_provenance": f"DDGS {timelimit} recency window requested; source publication time is not independently verified"}
+            for item in results
+        ]
     if not results:
         logger.info("Metasearch returned no results; trying DuckDuckGo HTML")
-        results = await search_duckduckgo_html(query, num_results, retries=3)
-
-    # A recent-only search can be sparse for niche topics. Expand the window
-    # while keeping the filtered matches first instead of returning nothing.
-    if timelimit and len(results) < min(3, num_results):
-        broader_results = await search_with_ddgs(query, num_results, timelimit=None)
-        seen = {item.get("href", item.get("link", "")) for item in results}
-        results.extend(
-            item for item in broader_results
-            if item.get("href", item.get("link", "")) not in seen
-        )
-        results = results[:num_results]
+        results = await search_duckduckgo_html(query, num_results, retries=1)
+        if timelimit:
+            results = [{**item, "_provenance": "DuckDuckGo HTML fallback cannot honor requested date filter; freshness unverified"} for item in results]
+    unique = []
+    seen = set()
+    for item in results:
+        key = _canonical_url(item.get("href", item.get("link", "")))
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        unique.append(item)
+    results = unique[:num_results]
     return results
+
+
+def _canonical_url(url: str) -> str:
+    if not url:
+        return ""
+    from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+    try:
+        parsed = urlsplit(extract_url_from_ddg_redirect(url))
+        if parsed.scheme.lower() not in {"http", "https"} or not parsed.hostname:
+            return ""
+        host = parsed.hostname.lower().removeprefix("www.")
+        path = parsed.path.rstrip("/") or "/"
+        query = urlencode(sorted((k, v) for k, v in parse_qsl(parsed.query) if not k.lower().startswith("utm_") and k.lower() not in {"fbclid", "gclid"}))
+        return urlunsplit((parsed.scheme.lower(), host, path, query, ""))
+    except Exception:
+        return ""
+
+
+def _fallback_warning(results: list[dict]) -> str:
+    warnings = []
+    if any("broadened unfiltered" in item.get("_provenance", "") for item in results):
+        warnings.append("Some results came from an unfiltered broadened fallback and are not verified as recent.")
+    if any("cannot honor requested date filter" in item.get("_provenance", "") for item in results):
+        warnings.append("DuckDuckGo HTML fallback cannot honor the requested date filter; those results are freshness-unverified.")
+    return " ".join(warnings)
 
 
 def _format_result_list(results: list[dict], limit: int) -> str:
@@ -151,6 +223,8 @@ def _format_result_list(results: list[dict], limit: int) -> str:
         url = result.get("href", result.get("link", ""))
         snippet = result.get("body", result.get("snippet", "No snippet available"))
         lines.append(f"{index}. {title}\nURL: {url}\nSnippet: {snippet}")
+        if result.get("_provenance"):
+            lines[-1] += f"\nEvidence window: {result['_provenance']}"
     return "\n\n".join(lines)
 
 
@@ -162,9 +236,12 @@ async def _extract_source(result: dict, max_chars: int = 1800) -> str:
         return ""
 
     try:
-        html = await fetch_url(url, timeout=15.0, retries=1)
+        html = await fetch_url(url, timeout=10.0, retries=0)
         if html:
-            from ..utils.extractors import extract_structured_data, format_extracted_data
+            from ..utils.extractors import (
+                extract_structured_data,
+                format_extracted_data,
+            )
 
             data = extract_structured_data(html, url)
             structured = format_extracted_data(data).strip()
@@ -185,7 +262,7 @@ async def _extract_source(result: dict, max_chars: int = 1800) -> str:
             if len(sections) > 1:
                 return "\n\n".join(sections)
     except Exception as e:
-        logger.warning("Unable to extract result %s: %s", url, e)
+        logger.warning("Unable to extract search result (%s)", type(e).__name__)
 
     return ""
 
@@ -196,19 +273,38 @@ async def search_web(query: str, num_results: int = 10, deep_search: bool = Fals
     Set ``deep_search`` to read and extract content from up to three results.
     This tool does not reuse cached search results.
     """
-    if not query.strip():
+    if not query.strip() or len(query) > 1000:
         return "Error: Please provide a search query."
 
-    num_results = max(1, min(num_results, 20))
+    if not isinstance(num_results, int) or isinstance(num_results, bool) or not 1 <= num_results <= 100:
+        return "Error: num_results must be between 1 and 20."
+    num_results = min(num_results, 20)
     now = datetime.now().astimezone()
     search_query = _query_with_date_context(query, now)
-    results = await _search(search_query, num_results, _time_filter_for_query(query))
+    event_query = _event_status_query(query)
+    if event_query and not _is_historical_query(query):
+        search_query += " reviews results release status after scheduled date"
+    sports_matchup = _is_sports_matchup(query)
+    if sports_matchup:
+        search_query += " latest match results series schedule fixtures"
+    results = await _search(search_query, num_results, _time_filter_for_query(query, now))
+    retrieval_time = _search_timestamp(now)
     if not results:
-        return f"Search performed: {get_current_datetime()}\nNo fresh results found for: {query}. Try a different query."
+        warning = " Event status is unverified because no evidence from after the scheduled date was found." if event_query else ""
+        if sports_matchup:
+            warning += " No current result or fixture was verified; do not infer a score or schedule."
+        return f"Search attempted: {retrieval_time}\nNo results found for: {query}. Try a different query.{warning}"
 
-    output = [f"Search performed: {get_current_datetime()}", f"Search: {query}"]
+    output = [f"Search attempted: {retrieval_time}", f"Search: {query}"]
     output.append(f"Search query with time context: {search_query}")
     output.append(_format_result_list(results, num_results))
+    if event_query:
+        output.append("Event status: unverified. Search results and old schedules alone do not establish that a scheduled event occurred; look for dated post-event evidence before claiming completion or that it remains upcoming.")
+    if sports_matchup:
+        output.append("Likely intent: current or most recent head-to-head sports results and upcoming fixtures. Answer that directly, cite the returned source URLs beside scores and dates, and do not invent a score or schedule. Do not pivot to a general country comparison unless asked.")
+        output.append("Sports status: treat any score or fixture as unverified unless a returned source provides dated evidence.")
+    if warning := _fallback_warning(results):
+        output.append("Warning: " + warning)
 
     if deep_search:
         pages = await asyncio.gather(*(_extract_source(result) for result in results[:3]))
@@ -218,28 +314,38 @@ async def search_web(query: str, num_results: int = 10, deep_search: bool = Fals
     return "\n\n".join(output)
 
 
-async def smart_search(query: str, max_sources: int = 3) -> str:
+async def smart_search(query: str, max_sources: int = 2) -> str:
     """Search fresh sources, read them, and include the current clock context."""
     return await deep_search(query, num_sources=max_sources)
 
 
 async def deep_search(query: str, num_sources: int = 5) -> str:
     """Fresh multi-source research with source URLs and extracted page content."""
-    if not query.strip():
+    if not query.strip() or len(query) > 1000:
         return "Error: Please provide a search query."
 
-    num_sources = max(1, min(num_sources, 8))
+    if not isinstance(num_sources, int) or isinstance(num_sources, bool) or not 1 <= num_sources <= 8:
+        return "Error: num_sources must be between 1 and 8."
     now = datetime.now().astimezone()
     search_query = _query_with_date_context(query, now)
-    clock_context = get_current_datetime()
+    event_query = _event_status_query(query)
+    if event_query:
+        search_query += " reviews results release status after scheduled date"
+    sports_matchup = _is_sports_matchup(query)
+    if sports_matchup:
+        search_query += " latest match results series schedule fixtures"
+    clock_context = _search_timestamp(now)
 
     results = await _search(
         search_query,
-        min(20, max(num_sources + 6, 12)),
-        _time_filter_for_query(query),
+        min(12, max(num_sources * 2, 4)),
+        _time_filter_for_query(query, now),
     )
     if not results:
-        return f"No fresh results found for: {query}. Search attempted at {clock_context}."
+        status = " Event status is unverified because no post-scheduled-date evidence was found." if event_query else ""
+        if sports_matchup:
+            status += " No current result or fixture was verified; do not infer a score or schedule."
+        return f"No results found for: {query}. Search attempted at {clock_context}.{status}"
 
     # Skip duplicate domains so the extracted evidence is less likely to repeat
     # the same publisher's coverage several times.
@@ -249,7 +355,7 @@ async def deep_search(query: str, num_sources: int = 5) -> str:
         url = result.get("href", result.get("link", ""))
         if not url or _SKIP_PAGE_RE.search(url):
             continue
-        domain_match = re.match(r"https?://([^/]+)", url, re.I)
+        domain_match = re.match(r"https?://([^/]+)", url, re.IGNORECASE)
         domain = domain_match.group(1).lower().removeprefix("www.") if domain_match else url
         if domain in seen_domains:
             continue
@@ -271,4 +377,11 @@ async def deep_search(query: str, num_sources: int = 5) -> str:
         sections.append("## Read source pages\n" + "\n\n".join(extracted))
     else:
         sections.append("Source pages could not be opened; use the search snippets only as leads, not as verified evidence.")
+    if event_query:
+        sections.append("Event status: unverified unless a fetched source provides evidence dated after the scheduled occurrence. An old announcement is evidence of a plan only.")
+    if sports_matchup:
+        sections.append("Likely intent: current or most recent head-to-head sports results and upcoming fixtures. Answer that directly, cite the returned source URLs beside scores and dates, and do not invent a score or schedule. Do not pivot to a general country comparison unless asked.")
+        sections.append("Sports status: treat any score or fixture as unverified unless a returned source provides dated evidence.")
+    if warning := _fallback_warning(results):
+        sections.append("Warning: " + warning)
     return "\n\n".join(sections)

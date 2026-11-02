@@ -1,10 +1,10 @@
-# MCP Internet Server: Technical Overview
+# Web Search for LM Studio LLMS: Technical Overview
 
 This document describes the current implementation in `src/mcp_internet`. For platform-specific setup, see [MULTI_PLATFORM_GUIDE.md](MULTI_PLATFORM_GUIDE.md).
 
 ## Purpose
 
-MCP Internet Server is a local Python MCP server for LM Studio and other MCP clients. It exposes 13 focused tools for fresh web research, page reading, news, community/video/developer sources, weather, and time. The server uses stdio transport; logs go to stderr.
+Web Search for LM Studio LLMS is a local Python MCP server for LM Studio and other MCP clients. It exposes 13 focused tools for fresh web research, page reading, news, community/video/developer sources, weather, and time. The installable package and command remain `mcp-internet`. The server uses stdio transport; logs go to stderr.
 
 ## Tool list
 
@@ -21,14 +21,14 @@ The server no longer registers the previous email, QR, IP, URL-shortening, trans
 
 ## Search and freshness
 
-- Use **`smart_search`** for factual answers. It performs a fresh DuckDuckGo search, fetches selected source pages concurrently, extracts page content, and returns source URLs plus the current local and UTC time.
+- Use **`smart_search`** for factual answers. It performs a fresh DDGS metasearch (automatic backend selection), reads up to two source pages by default, extracts page content, and returns source URLs plus the server retrieval time and UTC offset. Short matchups between recognized national teams are interpreted as asking for recent results and fixtures, not a country comparison, unless the query signals otherwise.
 - Use **`deep_search`** when a question needs broader source coverage. It also performs a fresh search and includes clock context.
 - Use **`search_web`** for link discovery. Its snippets are leads; use `smart_search` to ground an answer in page content.
-- Every search query is anchored to the current local date; every result also includes the local/UTC retrieval time. Explicit recency requests can use a search-engine date filter. Upcoming schedules avoid narrow date filters so older announcements can still be found. Search results are not served from a cache.
+- Time-sensitive queries receive current-date context; timeless or explicitly historical queries are preserved. Explicit recency requests can use a search-engine date filter. Upcoming schedules avoid narrow date filters so older announcements can still be found. The sequence is DDGS metasearch first, then DuckDuckGo HTML if DDGS fails or has no results. HTML fallback cannot enforce DDGS date filters and is labeled as freshness-unverified. Search results are not served from a cache.
 - The shared `get_current_datetime` function reads the local system clock. It supports the system timezone, common city names, and IANA timezones, and returns local and UTC timestamps. Search results include this automatically, so the model need not make a second clock call for ordinary research.
 - Source pages are read in parallel, with duplicate publisher domains skipped where possible. Extracted structured metadata is returned alongside readable page text. Page publication dates are included only when found in page data; the fetch timestamp is not a publication date.
 
-The `ddgs` metasearch package is primary, with DuckDuckGo HTML as a fallback. Search ranking is provided by the search backend; the server does not independently verify ranking or claim that snippets prove a fact. If source pages cannot be opened, the response says to treat snippets as leads only.
+The `ddgs` metasearch package is primary, with DuckDuckGo HTML as a fallback. Search ranking is provided by the search backend; the server does not independently verify ranking or claim that snippets prove a fact. If source pages cannot be opened, the response says to treat snippets as leads only. Retrieval time records when the server received a response, not when the source published it. On passed event dates, report status as unverified unless source evidence after the scheduled date establishes what happened.
 
 ## Other sources
 
@@ -41,6 +41,8 @@ The `ddgs` metasearch package is primary, with DuckDuckGo HTML as a fallback. Se
 - `read_webpage` and `read_pdf` fetch user-specified URLs and return extracted text.
 
 Network sources are public services; their availability and response formats can change. A search timestamp records when this server fetched results, not when every source published or last updated its information.
+
+MCP returns context only after the model calls a tool; it cannot inject current time into LM Studio's original prompt before generation. Use the recommended LM Studio instructions to encourage tool calls for current factual questions. Search engines can return stale results, websites can block extraction, and omitted dates limit verification. The server provides provenance and bounded evidence; it cannot guarantee that a model will never hallucinate.
 
 ## Implementation map
 

@@ -11,7 +11,7 @@ import json
 import logging
 import re
 
-from bs4 import BeautifulSoup, Tag
+from bs4 import BeautifulSoup
 
 logger = logging.getLogger(__name__)
 
@@ -23,13 +23,19 @@ logger = logging.getLogger(__name__)
 def extract_json_ld(soup: BeautifulSoup) -> list[dict]:
     """Extract JSON-LD structured data (Schema.org) from the page."""
     results = []
+    def collect(value):
+        if isinstance(value, list):
+            for child in value:
+                collect(child)
+        elif isinstance(value, dict):
+            if value.get("@type"):
+                results.append(value)
+            if "@graph" in value:
+                collect(value["@graph"])
     for script in soup.find_all("script", type="application/ld+json"):
         try:
             data = json.loads(script.string or "")
-            if isinstance(data, list):
-                results.extend(data)
-            elif isinstance(data, dict):
-                results.append(data)
+            collect(data)
         except (json.JSONDecodeError, TypeError):
             continue
     return results
@@ -49,13 +55,13 @@ def extract_opengraph(soup: BeautifulSoup) -> dict:
 def extract_page_dates(soup: BeautifulSoup) -> tuple[str, str]:
     """Read article/page publication metadata without guessing from page text."""
     published_keys = {
-        "article:published_time", "date", "datepublished", "publishdate",
+        "article:published_time", "article:published", "date", "datepublished", "publishdate", "publish-date",
         "pubdate", "dc.date", "dc.date.issued", "parsely-pub-date",
-        "sailthru.date", "datepublished",
+        "sailthru.date",
     }
     modified_keys = {
-        "article:modified_time", "datemodified", "last-modified",
-        "lastmod", "dc.date.modified", "parsely-modified-date",
+        "article:modified_time", "article:modified", "datemodified", "last-modified",
+        "lastmod", "dcterms.modified", "dc.date.modified", "parsely-modified-date",
     }
     published = modified = ""
 
@@ -82,6 +88,14 @@ def extract_page_dates(soup: BeautifulSoup) -> tuple[str, str]:
             parent_types = str(time_tag.parent.get("itemtype", "")) if time_tag.parent else ""
             if "Article" in parent_types or "NewsArticle" in parent_types:
                 published = value
+
+    for item in extract_json_ld(soup):
+        raw_types = item.get("@type", [])
+        types = raw_types if isinstance(raw_types, list) else [raw_types]
+        is_article = any(str(kind).split("/")[-1] in {"Article", "NewsArticle", "BlogPosting", "Report"} for kind in types)
+        if is_article:
+            published = published or str(item.get("datePublished", ""))
+            modified = modified or str(item.get("dateModified", ""))
 
     return published, modified
 
@@ -205,8 +219,9 @@ def extract_imdb(soup: BeautifulSoup, url: str) -> dict:
     # JSON-LD is the richest source on IMDb
     ld_data = extract_json_ld(soup)
     for item in ld_data:
-        item_type = item.get("@type", "")
-        if item_type in ("Movie", "TVSeries", "TVEpisode"):
+        raw_type = item.get("@type", "")
+        item_types = raw_type if isinstance(raw_type, list) else [raw_type]
+        if any(item_type in ("Movie", "TVSeries", "TVEpisode") for item_type in item_types):
             result["title"] = item.get("name", "")
             result["description"] = item.get("description", "")
             result["genre"] = item.get("genre", [])
@@ -367,9 +382,10 @@ _EXTRACTORS = {
 
 def get_extractor(url: str):
     """Get the appropriate extractor for a URL, falling back to generic."""
-    url_lower = url.lower()
+    from urllib.parse import urlsplit
+    host = (urlsplit(url).hostname or "").lower().rstrip(".")
     for domain, extractor in _EXTRACTORS.items():
-        if domain in url_lower:
+        if host == domain or host.endswith("." + domain):
             return extractor
     return extract_generic
 
@@ -400,7 +416,7 @@ def extract_structured_data(html: str, url: str) -> dict:
             result["modified_date"] = page_modified
         return result
     except Exception as e:
-        logger.error(f"Extraction error for {url}: {e}")
+        logger.error("Extraction error (%s)", type(e).__name__)
         return {"source": url, "error": str(e)}
 
 

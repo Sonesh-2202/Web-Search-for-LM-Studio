@@ -46,7 +46,6 @@ Thumbs.db
 
 # uv
 .uv/
-uv.lock
 
 # md
 PORTING_GUIDE.md

@@ -36,7 +36,11 @@ async def search_github(
     if not query.strip():
         return "❌ Error: Please provide a search query."
     
+    if len(query) > 500 or not isinstance(num_results, int) or isinstance(num_results, bool) or not 1 <= num_results <= 100:
+        return "❌ Error: query must be at most 500 characters and num_results must be 1-10."
     num_results = min(num_results, 10)
+    if sort not in {"stars", "forks", "updated", "help-wanted-issues"}:
+        return "❌ Error: Unsupported GitHub sort value."
     
     # Build query
     search_query = query
@@ -50,6 +54,9 @@ async def search_github(
     data = await fetch_json(url)
     
     if not data or "items" not in data:
+        if isinstance(data, dict) and data.get("message"):
+            if data.get("documentation_url") or "rate limit" in data["message"].lower():
+                return f"❌ GitHub API limit/error: {data['message']}"
         return f"❌ Error: Unable to search GitHub for '{query}'."
     
     repos = data.get("items", [])
@@ -71,11 +78,13 @@ async def search_github(
         lang = repo.get("language", "Unknown")
         html_url = repo.get("html_url", "")
         topics = repo.get("topics", [])[:3]
+        updated_at = repo.get("updated_at", "unknown")
         
         output += f"\n{i}. **{name}**\n"
         if description:
             output += f"   📝 {description[:100]}{'...' if len(description) > 100 else ''}\n"
         output += f"   ⭐ {stars:,} | 🍴 {forks:,} | 💻 {lang}\n"
+        output += f"   Updated: {updated_at} (GitHub content timestamp)\n"
         if topics:
             output += f"   🏷️ {', '.join(topics)}\n"
         output += f"   🔗 {html_url}\n"
@@ -164,7 +173,7 @@ async def get_repo_info(repo: str) -> str:
     if topics:
         output += f"\n🏷️ **Topics**: {', '.join(topics)}"
     
-    output += f"\n\n🔗 **Links**"
+    output += "\n\n🔗 **Links**"
     output += f"\n   📂 Repository: {html_url}"
     if homepage:
         output += f"\n   🌐 Homepage: {homepage}"
@@ -204,7 +213,6 @@ async def get_github_user(username: str) -> str:
     public_repos = data.get("public_repos", 0)
     followers = data.get("followers", 0)
     following = data.get("following", 0)
-    user_type = data.get("type", "User")
     html_url = data.get("html_url", "")
     created_at = data.get("created_at", "")[:10]
     

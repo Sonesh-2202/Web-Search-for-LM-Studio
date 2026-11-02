@@ -4,11 +4,11 @@ PDF Reader Tool - Extract text from PDF URLs.
 Uses pdfplumber or basic PDF parsing for text extraction.
 """
 
-import logging
 import io
+import logging
 import re
 
-from ..utils.http_client import fetch_url
+from ..utils.http_client import ResponseLimitError, UnsafeURLError, fetch_bytes
 
 logger = logging.getLogger(__name__)
 
@@ -28,24 +28,22 @@ async def read_pdf(url: str, max_pages: int = 5, max_length: int = 5000) -> str:
     if not url.strip():
         return "❌ Error: Please provide a PDF URL."
     
+    if len(url) > 4096:
+        return "❌ Error: URL exceeds the 4096 character limit."
+    if not isinstance(max_pages, int) or isinstance(max_pages, bool) or not isinstance(max_length, int) or isinstance(max_length, bool):
+        return "❌ Error: max_pages and max_length must be integers."
+    max_pages = max(1, min(max_pages, 20))
+    max_length = max(1, min(max_length, 20000))
     # Add protocol if missing
     if not url.startswith(("http://", "https://")):
         url = "https://" + url
     
     # Validate URL looks like a PDF
     if not url.lower().endswith('.pdf') and 'pdf' not in url.lower():
-        logger.warning(f"URL may not be a PDF: {url}")
+        logger.warning("Requested resource URL does not have a recognizable PDF suffix")
     
     try:
-        import httpx
-        
-        # Fetch PDF with binary mode
-        async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as client:
-            response = await client.get(url, headers={
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-            })
-            response.raise_for_status()
-            pdf_bytes = response.content
+        pdf_bytes = await fetch_bytes(url, timeout=30, retries=1)
         
         if not pdf_bytes:
             return "❌ Error: Unable to download PDF."
@@ -62,6 +60,8 @@ async def read_pdf(url: str, max_pages: int = 5, max_length: int = 5000) -> str:
             
             with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
                 total_pages = len(pdf.pages)
+                if total_pages > 500:
+                    return "❌ Error: PDF exceeds the 500 page processing limit."
                 pages_to_read = min(max_pages, total_pages)
                 
                 for i in range(pages_to_read):
@@ -79,13 +79,14 @@ async def read_pdf(url: str, max_pages: int = 5, max_length: int = 5000) -> str:
             if len(full_text) > max_length:
                 full_text = full_text[:max_length] + "\n\n[Content truncated...]"
             
-            return f"""📄 **PDF Content**
+            output = f"""📄 **PDF Content**
 🔗 {url}
 📖 Pages: {pages_to_read}/{total_pages}
 {'=' * 50}
 
 {full_text}
 """
+            return output[:max_length]
             
         except ImportError:
             # Fallback: Basic PDF text extraction without pdfplumber
@@ -103,7 +104,7 @@ async def read_pdf(url: str, max_pages: int = 5, max_length: int = 5000) -> str:
    pip install pdfplumber
 """
             
-            return f"""📄 **PDF Content** (Basic extraction)
+            output = f"""📄 **PDF Content** (Basic extraction)
 🔗 {url}
 {'=' * 50}
 
@@ -112,7 +113,10 @@ async def read_pdf(url: str, max_pages: int = 5, max_length: int = 5000) -> str:
 💡 Note: For better PDF extraction, install pdfplumber:
    pip install pdfplumber
 """
+            return output[:max_length]
         
+    except (UnsafeURLError, ResponseLimitError) as e:
+        return f"❌ Error: {e}"
     except Exception as e:
-        logger.error(f"Error reading PDF: {e}")
-        return f"❌ Error: Unable to read PDF. {str(e)}"
+        logger.error("Error reading PDF (%s)", type(e).__name__)
+        return f"❌ Error: Unable to read PDF ({type(e).__name__})."

@@ -8,6 +8,7 @@ Falls back to Google News RSS if needed.
 import asyncio
 import logging
 import os
+import re
 from datetime import datetime
 from html import unescape
 from urllib.parse import quote_plus
@@ -29,6 +30,13 @@ TOPIC_URLS = {
     "sports": "https://news.google.com/rss/topics/CAAqJggKIiBDQkFTRWdvSUwyMHZNRFp1ZEdvU0FtVnVHZ0pWVXlnQVAB?hl=en-US&gl=US&ceid=US:en",
     "entertainment": "https://news.google.com/rss/topics/CAAqJggKIiBDQkFTRWdvSUwyMHZNREpxYW5RU0FtVnVHZ0pWVXlnQVAB?hl=en-US&gl=US&ceid=US:en",
 }
+
+
+def _region_parts() -> tuple[str, str, str]:
+    locale = os.environ.get("MCP_SEARCH_REGION", "in-en").lower()
+    match = re.fullmatch(r"([a-z]{2})-([a-z]{2})", locale)
+    country, language = (match.groups() if match else ("in", "en"))
+    return language, country.upper(), country
 
 
 def get_news_ddgs(topic: str, count: int = 5) -> str | None:
@@ -54,7 +62,7 @@ def get_news_ddgs(topic: str, count: int = 5) -> str | None:
         if not results:
             return None
         
-        output = f"Latest News: {topic}\n"
+        output = f"Latest News: {topic} (DDGS search)\n"
         output += "=" * 50 + "\n"
         
         for i, news in enumerate(results, 1):
@@ -75,7 +83,7 @@ def get_news_ddgs(topic: str, count: int = 5) -> str | None:
         return output
         
     except Exception as e:
-        logger.error(f"Error fetching news via ddgs: {e}")
+        logger.error("Error fetching news via DDGS (%s)", type(e).__name__)
         return None
 
 
@@ -113,7 +121,7 @@ def parse_google_news_item(item: BeautifulSoup) -> dict | None:
             "date": pub_date,
         }
     except Exception as e:
-        logger.error(f"Error parsing news item: {e}")
+        logger.error("Error parsing news item (%s)", type(e).__name__)
         return None
 
 
@@ -121,13 +129,16 @@ async def get_news_rss(topic: str, count: int = 5) -> str | None:
     """Get news from Google News RSS (fallback method)."""
     topic_lower = topic.lower().strip()
     
+    language, country, country_lower = _region_parts()
+    hl, gl, ceid = f"{language}-{country_lower}", country, f"{country}:{language}"
     # Get RSS URL
     if topic_lower in TOPIC_URLS:
-        rss_url = TOPIC_URLS[topic_lower]
+        base = TOPIC_URLS[topic_lower].split("?")[0]
+        rss_url = f"{base}?hl={hl}&gl={gl}&ceid={ceid}"
         display_topic = topic_lower.capitalize()
     else:
         encoded = quote_plus(topic)
-        rss_url = f"https://news.google.com/rss/search?q={encoded}&hl=en-US&gl=US&ceid=US:en"
+        rss_url = f"https://news.google.com/rss/search?q={encoded}&hl={hl}&gl={gl}&ceid={ceid}"
         display_topic = topic
     
     rss_content = await fetch_url(rss_url)
@@ -151,7 +162,7 @@ async def get_news_rss(topic: str, count: int = 5) -> str | None:
             return None
         
         # Format output
-        output = f"Latest {display_topic} News\n"
+        output = f"Latest {display_topic} News (Google News RSS fallback; locale {hl}/{gl})\n"
         output += "=" * 50 + "\n"
         
         for i, news in enumerate(news_items, 1):
@@ -162,7 +173,7 @@ async def get_news_rss(topic: str, count: int = 5) -> str | None:
         return output
         
     except Exception as e:
-        logger.error(f"Error parsing news feed: {e}")
+        logger.error("Error parsing news feed (%s)", type(e).__name__)
         return None
 
 
@@ -179,6 +190,9 @@ async def get_news(topic: str = "world", count: int = 5) -> str:
     Returns:
         Formatted news headlines
     """
+    if not topic.strip() or len(topic) > 300 or not isinstance(count, int) or isinstance(count, bool) or count < 1:
+        return "Error: topic must be 1-300 characters and count must be 1-10."
+    count = min(count, 10)
     # Try ddgs first (more reliable for fresh news)
     result = await asyncio.to_thread(get_news_ddgs, topic, count)
     if result:
@@ -189,4 +203,4 @@ async def get_news(topic: str = "world", count: int = 5) -> str:
     if result:
         return result
     
-    return f"Error: Unable to fetch news for '{topic}'. Please try again later."
+    return f"Error: DDGS and Google News RSS fallback both failed for '{topic}'. Check network access or locale settings ({os.environ.get('MCP_SEARCH_REGION', 'in-en')})."
