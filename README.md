@@ -3,6 +3,7 @@
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/downloads/)
 [![MCP](https://img.shields.io/badge/protocol-MCP-green)](https://modelcontextprotocol.io/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow)](LICENSE)
+[![CI](https://github.com/Sonesh-2202/mcp-internet/actions/workflows/ci.yml/badge.svg)](https://github.com/Sonesh-2202/mcp-internet/actions/workflows/ci.yml)
 
 An open-source Model Context Protocol server that gives LM Studio and other MCP clients tools for fresh web search, source-page reading, news, weather, and selected public data. The package and executable remain `mcp-internet`. It uses the local machine clock and includes a compact retrieval timestamp in research results, so a model can reason about “today” without a separate clock call on every question.
 
@@ -16,6 +17,9 @@ Search results are evidence leads, not guaranteed truth. The server returns sour
 - Source results include readable page text alongside extracted JSON-LD, OpenGraph metadata, publication/update dates, and HTML tables when available, with additional parsers for selected domains.
 - Thirteen focused MCP tools, exposed over stdio for local clients.
 - No search API key is required by default. Public search engines and websites can rate-limit or change their pages.
+- URL reads reject non-public destinations and pin each validated hostname to its resolved public address for the connection, including after redirects.
+
+The goal is source-grounded research for local models: quick search when you need leads, and source reading when you need evidence. Search engines provide candidates; the server labels what it fetched and what it could not verify.
 
 ## Tools
 
@@ -34,6 +38,27 @@ Search results are evidence leads, not guaranteed truth. The server returns sour
 | `get_repo_info` | Reading public GitHub repository details. |
 | `get_weather` | Current forecast data for a location. |
 | `get_current_datetime` | Local/system time or a supported city/IANA timezone. |
+
+## Example
+
+Ask LM Studio: “What changed in the latest Python release?” The recommended prompt calls `smart_search`, which returns search leads and readable page evidence when available. A result is shaped like this (field names shown; values depend on the live search):
+
+```text
+Search attempted: <retrieval timestamp>
+1. <result title>
+URL: <source URL>
+Snippet: <search-engine snippet>
+
+## Read source pages
+## <page title>
+URL: <source URL>
+### Extracted metadata
+- Page published: <date, when present>
+### Page text
+<bounded extracted text, when reading succeeded>
+```
+
+Use `deep_search` when you need more source pages. A snippet without a matching extracted page is only a lead, not verified page content.
 
 ## Quick start
 
@@ -80,13 +105,17 @@ Restart or refresh MCP servers in LM Studio. For platform-specific examples, see
 
 ## Search behavior and accuracy
 
+### What a research response contains
+
+For a factual question, `smart_search` returns a compact set of result titles, URLs, snippets, readable page text when fetching succeeds, available page publication/update dates, and the server retrieval timestamp. `deep_search` reads more sources. If a page is blocked or cannot be extracted, its search result remains a snippet lead; the tool does not present that snippet as verified page text. The model should cite only the URLs returned by the tool.
+
 For a factual question, the model should call `smart_search` before answering. Time-sensitive queries include date context, selected pages are read, and the result includes a retrieval timestamp. The timestamp means “fetched at”; it does **not** mean that every result was published or updated then. When available, page publication and update dates are labeled separately.
 
 For release dates, schedules, and other events that may have changed, use evidence published after the scheduled date to decide whether the event actually happened. If only older announcements are available, report what was scheduled at the time and say the outcome could not be verified. Prefer official announcements for plans and independent current reporting for what happened. Cite only URLs returned by the tools; never turn a search snippet or an old prediction into a confirmed fact.
 
 Search uses the `ddgs` metasearch library with automatic backend selection by default. If it fails or yields no results, DuckDuckGo HTML is tried. When a requested date filter cannot be honored by that HTML fallback, the result is explicitly marked freshness-unverified. Set `MCP_SEARCH_REGION` (default `in-en`) to change the search region, for example `us-en` or `uk-en`. `MCP_SEARCH_BACKENDS` can override the DDGS backend, for example `bing,google`; backend availability depends on network and provider behavior.
 
-Search requests go to the configured DDGS search backend and may fall back to DuckDuckGo HTML. Source reading contacts the result pages; specialized tools also contact Reddit, YouTube, GitHub, and Open-Meteo. Queries and URLs are sent to those external services as needed. The server does not intentionally log query strings or fetched page contents; diagnostic logs go to stderr and identify hosts or error types.
+Search requests go to the configured DDGS search backend and may fall back to DuckDuckGo HTML. Source reading contacts the result pages; specialized tools also contact Reddit, YouTube, GitHub, and Open-Meteo. Queries and URLs are sent to those external services as needed. Direct URL fetches bypass environment-configured HTTP proxies so the checked DNS address is the address used for the connection; networks that require a proxy may not be able to fetch pages. The server does not intentionally log query strings or fetched page contents; diagnostic logs go to stderr and identify hosts or error types.
 
 No scraper can guarantee that a page is accessible or that a search engine ranks the best sources first. Some pages block automated requests, hide content behind scripts/paywalls, or omit publication dates. If source pages cannot be fetched, the result says to treat snippets as leads rather than verified evidence.
 
@@ -120,3 +149,9 @@ Common startup failures: if LM Studio reports that `uv` cannot be found, install
 ## License
 
 MIT. See [LICENSE](LICENSE).
+
+## Project health
+
+- [Changelog](CHANGELOG.md)
+- [Contributing](CONTRIBUTING.md)
+- [Security policy](SECURITY.md)

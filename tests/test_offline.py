@@ -193,6 +193,52 @@ async def test_hostname_resolving_private_rejected(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_hostname_with_any_private_answer_is_rejected(monkeypatch):
+    def resolve(*args, **kwargs):
+        return [
+            (2, 1, 6, "", ("93.184.216.34", 443)),
+            (2, 1, 6, "", ("10.0.0.8", 443)),
+        ]
+
+    monkeypatch.setattr(http_client.socket, "getaddrinfo", resolve)
+    with pytest.raises(http_client.UnsafeURLError, match="non-public"):
+        await http_client._validate_destination("mixed.example", 443)
+
+
+@pytest.mark.asyncio
+async def test_pinned_backend_connects_to_validated_ip(monkeypatch):
+    backend = http_client._PinnedNetworkBackend()
+    backend.pin("public.example", 443, ("93.184.216.34",))
+    observed = {}
+
+    async def connect(_self, host, port, **kwargs):
+        observed.update(host=host, port=port)
+        return "connected"
+
+    monkeypatch.setattr(http_client.AnyIOBackend, "connect_tcp", connect)
+    result = await backend.connect_tcp("public.example", 443)
+    assert result == "connected"
+    assert observed == {"host": "93.184.216.34", "port": 443}
+
+
+@pytest.mark.asyncio
+async def test_pinned_backend_falls_back_only_to_validated_addresses(monkeypatch):
+    backend = http_client._PinnedNetworkBackend()
+    backend.pin("public.example", 443, ("93.184.216.34", "2606:2800:220:1:248:1893:25c8:1946"))
+    attempted = []
+
+    async def connect(_self, host, port, **kwargs):
+        attempted.append(host)
+        if len(attempted) == 1:
+            raise http_client.httpcore.ConnectError("unreachable")
+        return "connected"
+
+    monkeypatch.setattr(http_client.AnyIOBackend, "connect_tcp", connect)
+    assert await backend.connect_tcp("public.example", 443) == "connected"
+    assert attempted == ["93.184.216.34", "2606:2800:220:1:248:1893:25c8:1946"]
+
+
+@pytest.mark.asyncio
 async def test_redirect_revalidates_private_target(monkeypatch):
     seen = []
 
@@ -230,6 +276,48 @@ async def test_redirect_revalidates_private_target(monkeypatch):
             rate_limit=False,
         )
     assert seen == ["example.com", "private-redirect.example"]
+
+
+@pytest.mark.asyncio
+async def test_request_pins_validated_destination_before_connect(monkeypatch):
+    pins = []
+
+    async def validate(host, port):
+        return ("93.184.216.34",)
+
+    class FakeClient:
+        def pin_destination(self, host, port, addresses):
+            pins.append((host, port, addresses))
+
+        def stream(self, *args, **kwargs):
+            response = httpx.Response(
+                200,
+                headers={"content-type": "text/html"},
+                content=b"<p>ok</p>",
+                request=httpx.Request("GET", "https://example.com"),
+            )
+
+            class Context:
+                async def __aenter__(self):
+                    return response
+
+                async def __aexit__(self, *args):
+                    pass
+
+            return Context()
+
+    monkeypatch.setattr(http_client, "_validate_destination", validate)
+    monkeypatch.setattr(http_client, "get_client", AsyncMock(return_value=FakeClient()))
+    await http_client._request_bytes(
+        "https://example.com",
+        headers=None,
+        timeout=1,
+        limit=100,
+        accepted_types=("text/html",),
+        retries=0,
+        rate_limit=False,
+    )
+    assert pins == [("example.com", 443, ("93.184.216.34",))]
 
 
 @pytest.mark.asyncio

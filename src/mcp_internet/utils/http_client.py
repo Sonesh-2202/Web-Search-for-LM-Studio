@@ -10,6 +10,8 @@ from typing import Any
 from urllib.parse import urljoin, urlsplit
 
 import httpx
+import httpcore
+from httpcore._backends.anyio import AnyIOBackend
 
 logger = logging.getLogger(__name__)
 MAX_URL_LENGTH = 4096
@@ -17,6 +19,7 @@ MAX_HTML_BYTES = 2_000_000
 MAX_JSON_BYTES = 1_000_000
 MAX_PDF_BYTES = 15_000_000
 MAX_REDIRECTS = 8
+MAX_DNS_ADDRESSES = 8
 
 _USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0 Safari/537.36",
@@ -26,6 +29,59 @@ _USER_AGENTS = [
 GOOGLEBOT_HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; Googlebot/2.1)", "Accept": "text/html,application/xhtml+xml,*/*;q=0.8"}
 DEFAULT_TIMEOUT = httpx.Timeout(30.0, connect=10.0)
 _client: httpx.AsyncClient | None = None
+
+
+class _PinnedNetworkBackend(AnyIOBackend):
+    """Connect to the public address that was checked for this request."""
+
+    def __init__(self):
+        self._pins: dict[tuple[str, int], tuple[str, ...]] = {}
+
+    def pin(self, host: str, port: int, addresses: tuple[str, ...]) -> None:
+        if not addresses:
+            raise UnsafeURLError("Hostname did not resolve to a public address")
+        self._pins[(host.lower(), port)] = addresses
+
+    async def connect_tcp(self, host, port, timeout=None, local_address=None, socket_options=None):
+        try:
+            address = ipaddress.ip_address(host)
+        except ValueError:
+            address = None
+        destinations = (str(address),) if address is not None else self._pins.get((host.lower(), port))
+        if not destinations:
+            raise UnsafeURLError("Hostname was not validated before connection")
+        last_error = None
+        for destination in destinations:
+            try:
+                return await super().connect_tcp(
+                    destination,
+                    port,
+                    timeout=timeout,
+                    local_address=local_address,
+                    socket_options=socket_options,
+                )
+            except (httpcore.ConnectError, httpcore.ConnectTimeout) as exc:
+                last_error = exc
+        raise last_error
+
+
+class _PinnedAsyncClient(httpx.AsyncClient):
+    def __init__(self):
+        transport = httpx.AsyncHTTPTransport(http2=True)
+        # HTTPX does not expose a resolver hook. Its httpcore pool accepts one;
+        # retain HTTPX request/TLS handling while pinning socket DNS resolution.
+        self._pinned_backend = _PinnedNetworkBackend()
+        transport._pool._network_backend = self._pinned_backend
+        super().__init__(
+            transport=transport,
+            trust_env=False,
+            timeout=DEFAULT_TIMEOUT,
+            follow_redirects=False,
+            headers=_get_default_headers(),
+        )
+
+    def pin_destination(self, host: str, port: int, addresses: tuple[str, ...]) -> None:
+        self._pinned_backend.pin(host, port, addresses)
 
 
 class UnsafeURLError(ValueError):
@@ -66,7 +122,7 @@ _rate_limiter = DomainRateLimiter()
 async def get_client() -> httpx.AsyncClient:
     global _client
     if _client is None or _client.is_closed:
-        _client = httpx.AsyncClient(timeout=DEFAULT_TIMEOUT, follow_redirects=False, headers=_get_default_headers(), http2=True)
+        _client = _PinnedAsyncClient()
     return _client
 
 
@@ -92,15 +148,23 @@ def _validate_url(url: str) -> tuple[str, str]:
         address = ipaddress.ip_address(host)
     except ValueError:
         address = None
+        try:
+            host = host.encode("idna").decode("ascii")
+        except UnicodeError as exc:
+            raise UnsafeURLError("Invalid internationalized hostname") from exc
     if address is not None and not address.is_global:
         raise UnsafeURLError("Non-public IP destinations are not allowed")
     return url, host
 
 
-async def _validate_destination(host: str, port: int) -> None:
+async def _validate_destination(host: str, port: int) -> tuple[str, ...]:
     try:
-        ipaddress.ip_address(host)
-        return
+        address = ipaddress.ip_address(host)
+        if not address.is_global:
+            raise UnsafeURLError("Non-public IP destinations are not allowed")
+        return (str(address),)
+    except UnsafeURLError:
+        raise
     except ValueError:
         pass
     try:
@@ -110,6 +174,7 @@ async def _validate_destination(host: str, port: int) -> None:
     addresses = {record[4][0].split("%")[0] for record in records}
     if not addresses or any(not ipaddress.ip_address(value).is_global for value in addresses):
         raise UnsafeURLError("Hostname resolves to a non-public IP address")
+    return tuple(sorted(addresses)[:MAX_DNS_ADDRESSES])
 
 
 async def _request_bytes(url: str, *, headers: dict[str, str] | None, timeout: float,
@@ -122,7 +187,11 @@ async def _request_bytes(url: str, *, headers: dict[str, str] | None, timeout: f
     for redirect in range(MAX_REDIRECTS + 1):
         _, host = _validate_url(current)
         parsed = urlsplit(current)
-        await _validate_destination(host, parsed.port or (443 if parsed.scheme == "https" else 80))
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+        addresses = await _validate_destination(host, port)
+        pin_destination = getattr(client, "pin_destination", None)
+        if pin_destination and addresses:
+            pin_destination(host, port, addresses)
         request_headers = {**_get_default_headers(), **(headers or {})}
         for attempt in range(max(0, min(retries, 4)) + 1):
             try:

@@ -1,0 +1,29 @@
+name: Attach Python distributions
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv python install 3.12
+      - name: Check release tag matches package version
+        run: |
+          VERSION=$(uv run --no-project --python 3.12 python -c "import pathlib, tomllib; print(tomllib.loads(pathlib.Path('pyproject.toml').read_text())['project']['version'])")
+          test "v$VERSION" = "$GITHUB_REF_NAME"
+      - run: uv build
+      - name: Attach source and wheel distributions
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.whl
+            dist/*.tar.gz

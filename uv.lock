@@ -663,6 +663,7 @@ source = { editable = "." }
 dependencies = [
     { name = "beautifulsoup4" },
     { name = "ddgs" },
+    { name = "httpcore" },
     { name = "httpx", extra = ["http2"] },
     { name = "lxml" },
     { name = "mcp", extra = ["cli"] },
@@ -686,6 +687,7 @@ pdf = [
 requires-dist = [
     { name = "beautifulsoup4", specifier = ">=4.12.0" },
     { name = "ddgs", specifier = ">=9.0.0" },
+    { name = "httpcore", specifier = ">=1.0.5,<2" },
     { name = "httpx", extras = ["http2"], specifier = ">=0.27.0" },
     { name = "lxml", specifier = ">=5.0.0" },
     { name = "mcp", extras = ["cli"], specifier = ">=1.2.0" },

@@ -7,7 +7,7 @@ license = { text = "MIT" }
 authors = [
     { name = "Sonesh", email = "sonesh@example.com" }
 ]
-keywords = ["mcp", "llm", "lm-studio", "ai", "internet", "tools", "search", "youtube", "github", "reddit", "smart-search"]
+keywords = ["mcp", "mcp-server", "llm", "local-llm", "lm-studio", "ai", "internet", "web-search", "web-research", "citations", "youtube", "github", "reddit"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
@@ -22,6 +22,7 @@ requires-python = ">=3.10"
 dependencies = [
     "mcp[cli]>=1.2.0",
     "httpx[http2]>=0.27.0",
+    "httpcore>=1.0.5,<2",
     "beautifulsoup4>=4.12.0",
     "lxml>=5.0.0",
     "ddgs>=9.0.0",

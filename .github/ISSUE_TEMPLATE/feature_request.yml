@@ -1,0 +1,24 @@
+name: Feature request
+description: Propose a focused improvement for local MCP web research.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: User problem
+      description: What task is difficult or impossible today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed change
+      description: Describe the smallest change that would solve the problem.
+    validations:
+      required: true
+  - type: textarea
+    id: tradeoffs
+    attributes:
+      label: Setup, privacy, or output tradeoffs
+    validations:
+      required: false
