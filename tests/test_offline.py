@@ -45,7 +45,7 @@ async def test_sports_matchup_search_is_direct_and_bounded(monkeypatch):
     monkeypatch.setattr(search, "datetime", FixedDateTime)
     captured = {}
 
-    async def fake_search(query, count, timelimit=None):
+    async def fake_search(query, count, timelimit=None, *args, **kwargs):
         captured.update(query=query, count=count, timelimit=timelimit)
         return [
             {"title": f"Source {i}", "href": f"https://source{i}.example/story", "body": "Result"}
@@ -109,7 +109,7 @@ def test_canonical_url_strips_tracking_and_redirect():
 async def test_recent_hits_avoid_slower_broadened_fallback(monkeypatch):
     calls = []
 
-    async def ddgs(query, count, timelimit=None):
+    async def ddgs(query, count, timelimit=None, **kwargs):
         calls.append(timelimit)
         if timelimit:
             return [{"title": "Fresh", "href": "https://x.test/a?utm_source=1"}]
@@ -504,7 +504,7 @@ def test_mcp_startup_registers_expected_tools_and_product_name():
     assert PRODUCT_NAME == "Web Search for LM Studio LLMS"
     assert mcp.name == PRODUCT_NAME
     assert {tool.name for tool in mcp._tool_manager.list_tools()} == {
-        "search_web", "smart_search", "deep_search", "read_webpage", "read_pdf",
+        "search_web", "smart_search", "deep_search", "compare_sources", "read_webpage", "read_pdf",
         "get_news", "search_reddit", "search_youtube", "get_video_info",
         "search_github", "get_repo_info", "get_weather", "get_current_datetime",
     }

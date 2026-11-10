@@ -4,7 +4,7 @@ This document describes the current implementation in `src/mcp_internet`. For pl
 
 ## Purpose
 
-Web Search for LM Studio LLMS is a local Python MCP server for LM Studio and other MCP clients. It exposes 13 focused tools for fresh web research, page reading, news, community/video/developer sources, weather, and time. The installable package and command remain `mcp-internet`. The server uses stdio transport; logs go to stderr.
+Web Search for LM Studio LLMS is a local Python MCP server for LM Studio and other MCP clients. It exposes 14 focused tools for fresh web research, source comparison, page reading, news, community/video/developer sources, weather, and time. The package command is `mcp-internet`; `mcp-internet-doctor` checks local setup. The server uses stdio transport; logs go to stderr.
 
 ## Tool list
 
@@ -12,6 +12,7 @@ Web Search for LM Studio LLMS is a local Python MCP server for LM Studio and oth
 |---|---|
 | Search | `smart_search`, `deep_search`, `search_web` |
 | Reading | `read_webpage`, `read_pdf` |
+| Comparison | `compare_sources` |
 | News and community | `get_news`, `search_reddit` |
 | YouTube | `search_youtube`, `get_video_info` |
 | GitHub | `search_github`, `get_repo_info` |
@@ -24,6 +25,8 @@ The server no longer registers the previous email, QR, IP, URL-shortening, trans
 - Use **`smart_search`** for factual answers. It performs a fresh DDGS metasearch (automatic backend selection), reads up to two source pages by default, extracts page content, and returns source URLs plus the server retrieval time and UTC offset. Short matchups between recognized national teams are interpreted as asking for recent results and fixtures, not a country comparison, unless the query signals otherwise.
 - Use **`deep_search`** when a question needs broader source coverage. It also performs a fresh search and includes clock context.
 - Use **`search_web`** for link discovery. Its snippets are leads; use `smart_search` to ground an answer in page content.
+- `search_web`, `smart_search`, and `deep_search` accept `region`, `time_range`, `include_domains`, `exclude_domains`, and `safesearch` controls. Defaults preserve automatic time intent, the configured region, and moderate safe search. Domain constraints are applied through `site:` query operators.
+- **`compare_sources`** reads 2–5 supplied web URLs or PDFs in parallel and labels each source as read or unavailable. It returns bounded text with URLs; the model should compare the evidence and publication dates rather than treating the tool as a fact-check verdict.
 - Time-sensitive queries receive current-date context; timeless or explicitly historical queries are preserved. Explicit recency requests can use a search-engine date filter. Upcoming schedules avoid narrow date filters so older announcements can still be found. The sequence is DDGS metasearch first, then DuckDuckGo HTML if DDGS fails or has no results. HTML fallback cannot enforce DDGS date filters and is labeled as freshness-unverified. Search results are not served from a cache.
 - The shared `get_current_datetime` function reads the local system clock. It supports the system timezone, common city names, and IANA timezones, and returns local and UTC timestamps. Search results include this automatically, so the model need not make a second clock call for ordinary research.
 - Source pages are read in parallel, with duplicate publisher domains skipped where possible. Extracted structured metadata is returned alongside readable page text. Page publication dates are included only when found in page data; the fetch timestamp is not a publication date.
@@ -51,7 +54,8 @@ LM Studio / MCP client
         │ JSON-RPC over stdio
         ▼
 src/mcp_internet/server.py      FastMCP tool registry
-        ├── tools/search.py       Fresh search, date anchoring, parallel extraction
+        ├── tools/search.py       Fresh search, filters, date anchoring, parallel extraction
+        ├── diagnostics.py        Local dependency and configuration checks
         ├── tools/webpage.py      HTML reading and structured extraction
         ├── tools/news.py         News headlines
         ├── tools/reddit.py       Reddit search

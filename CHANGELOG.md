@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Added `compare_sources` for bounded, side-by-side reading of webpages and PDFs.
+- Added per-call search region, date-range, domain, and safe-search filters.
+- Added `mcp-internet-doctor` for offline runtime and configuration diagnostics.
+
 ## [3.0.0] - 2026-11-02
 
 This source version provides a local stdio MCP server with focused web research and public information tools.

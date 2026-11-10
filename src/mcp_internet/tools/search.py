@@ -140,18 +140,20 @@ async def search_with_ddgs(
     query: str,
     num_results: int = 10,
     timelimit: str | None = None,
+    region: str | None = None,
+    safesearch: str = "moderate",
 ) -> list[dict]:
     """Search across several engines without blocking the event loop."""
     try:
         from ddgs import DDGS
 
         def do_search():
-            region = os.environ.get("MCP_SEARCH_REGION", "in-en")
+            selected_region = region or os.environ.get("MCP_SEARCH_REGION", "in-en")
             backends = os.environ.get("MCP_SEARCH_BACKENDS", "auto")
             return list(DDGS(timeout=7).text(
                 query,
-                region=region,
-                safesearch="moderate",
+                region=selected_region,
+                safesearch=safesearch,
                 timelimit=timelimit,
                 max_results=num_results,
                 backend=backends,
@@ -167,8 +169,12 @@ async def _search(
     query: str,
     num_results: int,
     timelimit: str | None = None,
+    region: str | None = None,
+    safesearch: str = "moderate",
 ) -> list[dict]:
-    results = await search_with_ddgs(query, num_results, timelimit=timelimit)
+    results = await search_with_ddgs(
+        query, num_results, timelimit=timelimit, region=region, safesearch=safesearch
+    )
     if timelimit and results:
         results = [
             {**item, "_provenance": f"DDGS {timelimit} recency window requested; source publication time is not independently verified"}
@@ -189,6 +195,41 @@ async def _search(
         unique.append(item)
     results = unique[:num_results]
     return results
+
+
+_TIME_RANGES = {"auto": None, "day": "d", "week": "w", "month": "m", "year": "y", "any": ""}
+_DOMAIN_RE = re.compile(r"^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$", re.IGNORECASE)
+
+
+def _search_options(query: str, time_range: str, include_domains: list[str] | None,
+                    exclude_domains: list[str] | None) -> tuple[str, str | None]:
+    """Apply explicit date and domain filters using search-engine query syntax."""
+    if not isinstance(time_range, str):
+        raise ValueError("time_range must be a string")
+    normalized_range = time_range.strip().lower()
+    if normalized_range not in _TIME_RANGES:
+        raise ValueError("time_range must be one of: auto, day, week, month, year, any")
+    if (include_domains is not None and not isinstance(include_domains, list)) or (
+        exclude_domains is not None and not isinstance(exclude_domains, list)
+    ):
+        raise ValueError("include_domains and exclude_domains must be lists of hostnames")
+    domains = (include_domains or []) + (exclude_domains or [])
+    if len(domains) > 10:
+        raise ValueError("provide no more than 10 domain filters")
+    if any(not isinstance(domain, str) or not _DOMAIN_RE.fullmatch(domain.strip()) for domain in domains):
+        raise ValueError("domains must be hostnames such as example.com")
+    normalized_includes = [domain.strip().lower() for domain in include_domains or []]
+    if len(normalized_includes) == 1:
+        query += f" site:{normalized_includes[0]}"
+    elif normalized_includes:
+        query += " (" + " OR ".join(f"site:{domain}" for domain in normalized_includes) + ")"
+    for domain in exclude_domains or []:
+        query += f" -site:{domain.strip().lower()}"
+    return query, _TIME_RANGES[normalized_range]
+
+
+def _effective_time_range(query: str, configured: str | None, now: datetime) -> str | None:
+    return _time_filter_for_query(query, now) if configured is None else configured or None
 
 
 def _canonical_url(url: str) -> str:
@@ -267,7 +308,11 @@ async def _extract_source(result: dict, max_chars: int = 1800) -> str:
     return ""
 
 
-async def search_web(query: str, num_results: int = 10, deep_search: bool = False) -> str:
+async def search_web(
+    query: str, num_results: int = 10, deep_search: bool = False,
+    region: str = "", time_range: str = "auto", include_domains: list[str] | None = None,
+    exclude_domains: list[str] | None = None, safesearch: str = "moderate",
+) -> str:
     """Perform a fresh web search and return result links with snippets.
 
     Set ``deep_search`` to read and extract content from up to three results.
@@ -278,16 +323,24 @@ async def search_web(query: str, num_results: int = 10, deep_search: bool = Fals
 
     if not isinstance(num_results, int) or isinstance(num_results, bool) or not 1 <= num_results <= 100:
         return "Error: num_results must be between 1 and 20."
+    if safesearch not in {"off", "moderate", "strict"}:
+        return "Error: safesearch must be off, moderate, or strict."
+    if region and not re.fullmatch(r"[a-z]{2}-[a-z]{2}", region, re.IGNORECASE):
+        return "Error: region must look like en-us or in-en."
     num_results = min(num_results, 20)
     now = datetime.now().astimezone()
     search_query = _query_with_date_context(query, now)
+    try:
+        search_query, configured_time = _search_options(search_query, time_range, include_domains, exclude_domains)
+    except ValueError as exc:
+        return f"Error: {exc}."
     event_query = _event_status_query(query)
     if event_query and not _is_historical_query(query):
         search_query += " reviews results release status after scheduled date"
     sports_matchup = _is_sports_matchup(query)
     if sports_matchup:
         search_query += " latest match results series schedule fixtures"
-    results = await _search(search_query, num_results, _time_filter_for_query(query, now))
+    results = await _search(search_query, num_results, _effective_time_range(query, configured_time, now), region or None, safesearch)
     retrieval_time = _search_timestamp(now)
     if not results:
         warning = " Event status is unverified because no evidence from after the scheduled date was found." if event_query else ""
@@ -314,20 +367,34 @@ async def search_web(query: str, num_results: int = 10, deep_search: bool = Fals
     return "\n\n".join(output)
 
 
-async def smart_search(query: str, max_sources: int = 2) -> str:
+async def smart_search(query: str, max_sources: int = 2, region: str = "", time_range: str = "auto",
+                       include_domains: list[str] | None = None, exclude_domains: list[str] | None = None,
+                       safesearch: str = "moderate") -> str:
     """Search fresh sources, read them, and include the current clock context."""
-    return await deep_search(query, num_sources=max_sources)
+    return await deep_search(query, num_sources=max_sources, region=region, time_range=time_range,
+                             include_domains=include_domains, exclude_domains=exclude_domains,
+                             safesearch=safesearch)
 
 
-async def deep_search(query: str, num_sources: int = 5) -> str:
+async def deep_search(query: str, num_sources: int = 5, region: str = "", time_range: str = "auto",
+                      include_domains: list[str] | None = None, exclude_domains: list[str] | None = None,
+                      safesearch: str = "moderate") -> str:
     """Fresh multi-source research with source URLs and extracted page content."""
     if not query.strip() or len(query) > 1000:
         return "Error: Please provide a search query."
 
     if not isinstance(num_sources, int) or isinstance(num_sources, bool) or not 1 <= num_sources <= 8:
         return "Error: num_sources must be between 1 and 8."
+    if safesearch not in {"off", "moderate", "strict"}:
+        return "Error: safesearch must be off, moderate, or strict."
+    if region and not re.fullmatch(r"[a-z]{2}-[a-z]{2}", region, re.IGNORECASE):
+        return "Error: region must look like en-us or in-en."
     now = datetime.now().astimezone()
     search_query = _query_with_date_context(query, now)
+    try:
+        search_query, configured_time = _search_options(search_query, time_range, include_domains, exclude_domains)
+    except ValueError as exc:
+        return f"Error: {exc}."
     event_query = _event_status_query(query)
     if event_query:
         search_query += " reviews results release status after scheduled date"
@@ -339,7 +406,9 @@ async def deep_search(query: str, num_sources: int = 5) -> str:
     results = await _search(
         search_query,
         min(12, max(num_sources * 2, 4)),
-        _time_filter_for_query(query, now),
+        _effective_time_range(query, configured_time, now),
+        region or None,
+        safesearch,
     )
     if not results:
         status = " Event status is unverified because no post-scheduled-date evidence was found." if event_query else ""

@@ -29,4 +29,4 @@ jobs:
       - run: uv run --extra dev ruff check src tests scripts
       - run: uv build
       - run: uv run python -c "import glob, subprocess; subprocess.run(['uv', 'pip', 'install', '--target', 'dist/install', '--no-deps', glob.glob('dist/*.whl')[0]], check=True)"
-      - run: uv run python -c "import sys; sys.path.insert(0, 'dist/install'); from mcp_internet import PRODUCT_NAME; from mcp_internet.server import mcp; assert PRODUCT_NAME == 'Web Search for LM Studio LLMS'; assert len(mcp._tool_manager.list_tools()) == 13"
+      - run: uv run python -c "import sys; sys.path.insert(0, 'dist/install'); from mcp_internet import PRODUCT_NAME; from mcp_internet.server import mcp; assert PRODUCT_NAME == 'Web Search for LM Studio LLMS'; assert len(mcp._tool_manager.list_tools()) == 14"

@@ -15,7 +15,10 @@ Search results are evidence leads, not guaranteed truth. The server returns sour
 - `smart_search` reads up to two sources by default for a faster evidence-backed answer; `deep_search` fetches a broader set. Both return source URLs, page content when available, publication metadata, and retrieval time.
 - Time-sensitive queries receive the server's current local date; timeless and explicitly historical queries are left intact. Search results include a server retrieval timestamp with UTC offset. Explicit recency requests can use search-engine date filters; upcoming schedules avoid narrow date filters so older announcements remain discoverable.
 - Source results include readable page text alongside extracted JSON-LD, OpenGraph metadata, publication/update dates, and HTML tables when available, with additional parsers for selected domains.
-- Thirteen focused MCP tools, exposed over stdio for local clients.
+- Fourteen focused MCP tools, exposed over stdio for local clients.
+- Per-search region, date-window, safe-search, and domain include/exclude controls.
+- `compare_sources` reads 2–5 supplied webpages or PDFs side by side, preserving source URLs and reporting fetch failures.
+- `mcp-internet-doctor` checks the local Python runtime, required dependencies, and search configuration without making network requests.
 - No search API key is required by default. Public search engines and websites can rate-limit or change their pages.
 - URL reads reject non-public destinations and pin each validated hostname to its resolved public address for the connection, including after redirects.
 
@@ -28,6 +31,7 @@ The goal is source-grounded research for local models: quick search when you nee
 | `smart_search` | Fresh search plus reading a few sources; recommended for factual questions. |
 | `deep_search` | Broader search and source reading. |
 | `search_web` | Finding links and snippets; optionally extracts pages. |
+| `compare_sources` | Reading 2–5 URLs (webpages or PDFs) for evidence comparison. |
 | `read_webpage` | Reading a URL supplied by the user. |
 | `read_pdf` | Extracting text from a PDF URL (install the `pdf` extra). |
 | `get_news` | Current headlines for a topic. |
@@ -62,12 +66,18 @@ Use `deep_search` when you need more source pages. A snippet without a matching 
 
 ## Quick start
 
-Requirements: Python 3.10 or later, Git, and [`uv`](https://docs.astral.sh/uv/). LM Studio does not install these prerequisites when you add an MCP entry. This project currently recommends running from a local source checkout; no PyPI installation command is advertised.
+Requirements: Python 3.10 or later, Git, and [`uv`](https://docs.astral.sh/uv/). LM Studio does not install these prerequisites when you add an MCP entry. The recommended setup is a local source checkout.
 
 ```bash
 git clone https://github.com/Sonesh-2202/mcp-internet.git
 cd mcp-internet
 uv sync
+```
+
+Check your local setup and dependency configuration with:
+
+```bash
+uv run mcp-internet-doctor
 ```
 
 For PDF support:
@@ -113,7 +123,7 @@ For a factual question, the model should call `smart_search` before answering. T
 
 For release dates, schedules, and other events that may have changed, use evidence published after the scheduled date to decide whether the event actually happened. If only older announcements are available, report what was scheduled at the time and say the outcome could not be verified. Prefer official announcements for plans and independent current reporting for what happened. Cite only URLs returned by the tools; never turn a search snippet or an old prediction into a confirmed fact.
 
-Search uses the `ddgs` metasearch library with automatic backend selection by default. If it fails or yields no results, DuckDuckGo HTML is tried. When a requested date filter cannot be honored by that HTML fallback, the result is explicitly marked freshness-unverified. Set `MCP_SEARCH_REGION` (default `in-en`) to change the search region, for example `us-en` or `uk-en`. `MCP_SEARCH_BACKENDS` can override the DDGS backend, for example `bing,google`; backend availability depends on network and provider behavior.
+Search uses the `ddgs` metasearch library with automatic backend selection by default. If it fails or yields no results, DuckDuckGo HTML is tried. When a requested date filter cannot be honored by that HTML fallback, the result is explicitly marked freshness-unverified. Set `MCP_SEARCH_REGION` (default `in-en`) to change the default search region, for example `us-en` or `uk-en`; each search tool can override it. Search tools also accept `time_range` (`auto`, `day`, `week`, `month`, `year`, or `any`), `include_domains`, `exclude_domains`, and `safesearch` (`off`, `moderate`, or `strict`). Domain filters use search-engine `site:` operators. `MCP_SEARCH_BACKENDS` can override the DDGS backend, for example `bing,google`; backend availability depends on network and provider behavior.
 
 Search requests go to the configured DDGS search backend and may fall back to DuckDuckGo HTML. Source reading contacts the result pages; specialized tools also contact Reddit, YouTube, GitHub, and Open-Meteo. Queries and URLs are sent to those external services as needed. Direct URL fetches bypass environment-configured HTTP proxies so the checked DNS address is the address used for the connection; networks that require a proxy may not be able to fetch pages. The server does not intentionally log query strings or fetched page contents; diagnostic logs go to stderr and identify hosts or error types.
 

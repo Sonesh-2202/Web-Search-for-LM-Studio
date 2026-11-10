@@ -4,6 +4,8 @@ The recommended setup is the same on Windows, macOS, and Linux: install Python 3
 
 For the full install, upgrade, uninstall, deeplink, and troubleshooting flow, follow the [README quick start](README.md#quick-start). For platform-specific executable paths, use forward slashes in `mcp.json`, including on Windows. For example, a Windows Python executable could be `C:/Users/you/mcp-internet/.venv/Scripts/python.exe`; macOS and Linux typically use `/path/to/mcp-internet/.venv/bin/python`.
 
+To diagnose a local installation before connecting LM Studio, run `uv run mcp-internet-doctor` from the checkout. This checks the Python version, required packages, search settings, and optional PDF support; it does not make network requests.
+
 The server runs over stdio and is launched and managed by LM Studio. Logs go to stderr. Do not start a second copy for the same LM Studio configuration.
 
 ## Optional PDF support

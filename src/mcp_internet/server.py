@@ -11,10 +11,12 @@ Features:
 - User-agent rotation and rate limiting
 """
 
+import asyncio
 import logging
 import re
 import sys
 from contextlib import asynccontextmanager
+from urllib.parse import urlsplit
 
 from mcp.server.fastmcp import FastMCP
 
@@ -56,7 +58,10 @@ def _with_fetch_timestamp(label: str, result: str) -> str:
 # SEARCH TOOLS
 # =============================================================================
 @mcp.tool()
-async def search_web(query: str, num_results: int = 10, deep_search: bool = False) -> str:
+async def search_web(query: str, num_results: int = 10, deep_search: bool = False,
+                     region: str = "", time_range: str = "auto",
+                     include_domains: list[str] | None = None, exclude_domains: list[str] | None = None,
+                     safesearch: str = "moderate") -> str:
     """Find web links and snippets using a fresh search with time context when relevant.
 
     Time-sensitive queries include the server's local date; timeless and
@@ -67,13 +72,21 @@ async def search_web(query: str, num_results: int = 10, deep_search: bool = Fals
         query: The search query (person, topic, question, anything)
         num_results: Number of results (default: 10, max: 20)
         deep_search: Fetch and extract content from top results for details
+        region: Optional region code such as 'us-en'; defaults to MCP_SEARCH_REGION
+        time_range: 'auto', 'day', 'week', 'month', 'year', or 'any'
+        include_domains: Limit results to these hostnames, such as ['example.com']
+        exclude_domains: Exclude results from these hostnames
+        safesearch: Search filtering: 'off', 'moderate' (default), or 'strict'
     """
     from .tools.search import search_web as _search
-    return await _search(query, num_results, deep_search)
+    return await _search(query, num_results, deep_search, region, time_range,
+                          include_domains, exclude_domains, safesearch)
 
 
 @mcp.tool()
-async def smart_search(query: str, max_sources: int = 2) -> str:
+async def smart_search(query: str, max_sources: int = 2, region: str = "", time_range: str = "auto",
+                       include_domains: list[str] | None = None, exclude_domains: list[str] | None = None,
+                       safesearch: str = "moderate") -> str:
     """Use before answering a current real-world factual question.
 
     Searches afresh, adds date context to time-sensitive queries, reads top
@@ -85,11 +98,14 @@ async def smart_search(query: str, max_sources: int = 2) -> str:
     results and fixtures unless the user asks for a country comparison.
     """
     from .tools.search import smart_search as _smart_search
-    return await _smart_search(query, max_sources)
+    return await _smart_search(query, max_sources, region, time_range, include_domains,
+                               exclude_domains, safesearch)
 
 
 @mcp.tool()
-async def deep_search(query: str, num_sources: int = 5) -> str:
+async def deep_search(query: str, num_sources: int = 5, region: str = "", time_range: str = "auto",
+                      include_domains: list[str] | None = None, exclude_domains: list[str] | None = None,
+                      safesearch: str = "moderate") -> str:
     """Do fresh, broader research with relevant date context and read multiple source pages.
     
     Args:
@@ -97,7 +113,35 @@ async def deep_search(query: str, num_sources: int = 5) -> str:
         num_sources: Number of pages to scrape and analyze (1-8, default: 5)
     """
     from .tools.search import deep_search as _deep
-    return await _deep(query, num_sources)
+    return await _deep(query, num_sources, region, time_range, include_domains,
+                       exclude_domains, safesearch)
+
+
+@mcp.tool()
+async def compare_sources(urls: list[str], question: str = "") -> str:
+    """Read 2 to 5 URLs for a side-by-side evidence comparison.
+
+    Returns bounded content per URL. It does not decide which source is correct;
+    compare dates, claims, and evidence in the returned material.
+    """
+    if not 2 <= len(urls) <= 5:
+        return "Error: provide between 2 and 5 source URLs."
+
+    async def read_one(url: str) -> str:
+        if not isinstance(url, str) or not url.strip() or len(url) > 4096:
+            return f"Source: {url!r}\nStatus: invalid URL."
+        if urlsplit(url).path.lower().endswith(".pdf"):
+            from .tools.pdf_reader import read_pdf as _read_pdf
+            content = await _read_pdf(url, max_pages=3, max_length=3500)
+        else:
+            from .tools.webpage import read_webpage as _read_page
+            content = await _read_page(url, max_length=3500)
+        status = "read" if not content.startswith("❌ Error:") else "unavailable"
+        return f"## Source ({status})\nURL: {url}\n{content[:3500]}"
+
+    sources = await asyncio.gather(*(read_one(url) for url in urls))
+    prompt = f"Question to compare: {question.strip() or '(compare the sources generally)'}"
+    return prompt + "\n\n" + "\n\n".join(sources)
 
 
 # =============================================================================

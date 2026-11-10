@@ -36,6 +36,7 @@ dev = ["pytest>=8.0.0", "pytest-asyncio>=0.23.0", "ruff>=0.6.0"]
 
 [project.scripts]
 mcp-internet = "mcp_internet.server:main"
+mcp-internet-doctor = "mcp_internet.diagnostics:main"
 
 [project.urls]
 Homepage = "https://github.com/Sonesh-2202/mcp-internet"
